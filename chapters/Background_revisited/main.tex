@@ -1,0 +1,28 @@
+\makeatletter
+\providecommand*{\input@path}{}
+\g@addto@macro\input@path{{../../}}
+\PassOptionsToPackage{nolist}{acronym}
+\makeatother
+
+\documentclass{ugent-thesis}
+
+\input{header.tex}
+\bibliographyfile{../../references}
+
+% Fix to display bibliography for individual chapter
+% LaTeX Workshop runs BibTeX from the chapter directory with bin/main.aux,
+% so the .bib path is resolved relative to this file's directory.
+
+\begin{document}
+    \makeatletter
+    \begin{acronym}[\@acronymsize]%
+        \input{\@acronyms}%
+    \end{acronym}
+    \makeatother
+
+    \body
+    \input{content.tex}
+
+    \makebibliography
+\end{document}
+ 

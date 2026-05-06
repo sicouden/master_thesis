@@ -1,0 +1,24 @@
+\acro{IMDD}{intensity modulation and direct detection}
+\acro{PAM4}{pulse amplitude modulation 4-level}
+\acro{QPSK}{quatrature phase shift keying}
+\acro{QAM}{quadrature amplitude modulation}
+\acro{16QAM}{16-state quadrature amplitude modulation}
+\acro{ASIC}{application specific integrated circuit}
+\acro{DSP}{digital dignal processing}
+\acro{BPS}{blind phase search}
+\acro{SBPS}{serialised binary phase search}
+\acro{SE}{spread estimation}
+\acro{PU}{phase unwrapper}
+\acro{PC}{phase compensator}
+\acro{FPGA}{field programmable gate array}
+\acro{CORDIC}{coordinate rotation digital computer}
+\acro{IP}{intellectual property}
+\acro{VHDL}{VHSIC Hardware Description Language}
+\acro{SNR}{signal-to-noise ratio}
+\acro{LUT}{look-up table}
+\acro{CFO}{carrier frequency offset}
+\acro{VHSIC}{very high speed integrated circuit}
+\acro{LO}{local oscillator}
+\acro{ASE}{amplified spontaneous emission}
+\acro{FFT}{fast fourier-transform}
+\acro{MUX}{multiplexer}

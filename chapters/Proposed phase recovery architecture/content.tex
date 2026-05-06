@@ -1,0 +1,162 @@
+\chapter{Proposed phase recovery architecture} \label{Proposed phase recovery architecture}
+Here:
+explain algorithm clearly
+use diagrams
+use equations
+refer to paper but explain your version
+This chapter = theory of your solution.
+
+\section{System overview}
+\todo{explain what the purpose is of the 2 stage design, e.g; why SBPS needs to track middle phase, SE the spread}
+
+Assumption that
+\begin{equation}
+    \sum_{i=0}^{B-1}\phi_i \ll 2\pi \Delta f T_s B
+\end{equation}
+
+\section{Serialized blind phase search}\todo{needs to be more detailed}
+The purpose of SBPS is to estimate the carrier phase of the middle of a processing block with 
+much lower complexity than conventional blind phase search. This estimate should be accurate enough to serve as the central 
+anchor point of the proposed phase recovery architecture, and must be in range of the largest CFO error that is possible
+for a certain frequency recovery architecture\todo{maybe explain why?}. 
+However, because only one phase estimate is produced per block 
+and because the BPS metric is inherently $\pi$/2-ambiguous for square QAM constellations, additional processing is required to 
+(i) track phase continuity between successive blocks and (ii) reconstruct the phase evolution inside the block. 
+These two tasks are handled by the phase unwrapping and spread estimation blocks, respectively.
+\\\\
+In conventional BPS, many candidate phases are evaluated in parallel over the full search interval (as 
+mentioned in section \ref{background: blind phase search}). 
+Although this leads to robust phase estimation, it also results in a substantial computational cost. \todo{maybe here 
+delve into the specific costs}
+\\\\
+For square \ac{QAM} constellations, the search interval is limited to
+\[
+\left[-\frac{\pi}{4},\frac{\pi}{4}\right),
+\]
+The key idea of \ac{SBPS} is to approximate the optimal test phase through successive refinement. 
+Instead of testing many candidate phases simultaneously, only two candidate rotations are evaluated at 
+each stage: one on either side of the current estimate. The candidate producing the lower decision-directed 
+metric is retained, after which the search interval is halved and a more refined correction is tested in the next stage.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/BPS_vs_SBPS.png}
+\caption{BPS versus SBPS guided phase estimation}
+\end{figure}
+\todo{remake figure for more fitting representation}
+
+In the binary variant adopted here \todo{motivate why binary search is chosen?}, the first stage tests the two hypotheses
+\[
+\phi_1 \in \left\{-\frac{\pi}{8},+\frac{\pi}{8}\right\},
+\]
+and stage \(m\) refines the estimate by adding or subtracting a correction term of magnitude \(\pi/2^{m+2}\). Hence, the estimate after 
+stage \(m\) can be written recursively as
+\[
+\hat{\phi}_m = \hat{\phi}_{m-1} \pm \frac{\pi}{2^{m+2}}.
+\]
+\\\\
+
+
+This staged procedure is equivalent to a binary search over the phase interval and yields an exponentially decreasing phase quantization error 
+as the number of stages increases. The referenced work formulates this refinement explicitly and 
+shows that the worst-case estimation error decreases with each added stage, while the number of candidate rotations only grows 
+linearly with the number of stages \cite{Jonas}. \todo{maybe useful to explain how complexity scales with accuracy} 
+\\\\
+For each candidate phase \(\phi\), a decision-directed metric is computed over a block of received symbols:
+\[
+J(\phi)=\sum_{k\in\mathcal{W}}\left|D\!\left(r_k e^{-j\phi}\right)-r_k e^{-j\phi}\right|^2,
+\]
+where \(r_k\) denotes the received symbol, \(D(\cdot)\) the slicer, and \(\mathcal{W}\) the symbol window 
+used for metric accumulation. 
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\linewidth]{figures/decision-directed_carrier_recovery.png}
+\caption{remake figure for more fitting representation}
+\label{fig:decision-directed_carrier_recovery}
+\end{figure}
+\todo{remake figure for more fitting representation}
+
+The candidate phase yielding the smallest metric is assumed to correspond most 
+closely to the true carrier phase. In this work, the resulting estimate is interpreted as the carrier phase at 
+the middle of the block, denoted by \(\hat{\phi}_e\). This interpretation is important, since in the presence of 
+residual frequency offset the carrier phase is not constant over the entire block but varies approximately linearly 
+with symbol index \todo{and laser phase drift is also present! (job of SE)}.
+\\\\
+\subsection{Adaptation to 16QAM}
+
+\subsection{Block size consideration}
+A consideration for the effectiveness of the SBPS is the frequency recovery stage \ac{FFT}-bin spacing. 
+This FFT bin spacing determines the maximum residual \ac{CFO} that remains after course frequency recovery 
+(equation \ref{eq: frequency recovery bin size error}).
+\\ 
+This residual CFO causes a phase drift across one SBPS processing block of $ B $ symbols:
+
+$$
+    \Delta \phi_{block} \approx 2\pi \Delta f_e B T_s
+$$
+
+Since $ T_s = 1/F_s $, subsituting the worst-case residual CFO gives:
+$$
+    \Delta \phi_{block,max} = 2\pi(\frac{F_s}{2N_{FFT}})B(\frac{1}{F_s})
+$$
+
+which simplifies to:
+
+$$
+    \Delta \phi_{block,max} = \pi \frac{B}{N_{FFT}}
+$$
+
+So, the worst-case accumulated phase drift over a block depends only on block size and FFT, not directly on sampling frequency.
+
+For the proposed SBPS with a $ \pi/4 $ unwrapping threshold, the following condition needs to be specified:
+
+$$
+    \Delta \phi_{block,max} \le \pi/4
+$$
+
+which gives
+
+\begin{equation}
+    N_{FFT} > 4B
+\end{equation}
+
+For example, a blocksize of $ B = 64 $ would need at least $ N_{FFT} > 256 $ for the SBPS to be effective without introducing (additional) cycle slips. 
+This is a theoretical minimum, and in practice a margin
+is recommended because of the presence of linewidth-induced phase noise and estimation errors. \todo{find ref for binsize related to accuracy?}
+\\\\
+Further, the block size has a dual effect on estimation quality. On the one hand, using more symbols in the metric accumulation 
+improves robustness against additive noise, because the random perturbations introduced by noise and symbol decisions are 
+averaged over a larger number of samples \cite{Mello_2018}. On the other hand, a larger block spans a longer time interval, so the phase variation 
+caused by residual frequency offset and phase noise becomes larger within the block. As a result, a single phase estimate 
+becomes less representative for all symbols in the block. 
+\\\\
+This trade-off is one of the main motivations for the proposed two-part 
+architecture: \ac{SBPS} provides an accurate estimate of the middle-block phase, while the spread estimation block reconstructs 
+the phase evolution around that midpoint.
+
+
+\missingfigure{abs error versus \# of stage for different amount of testangles}
+\todo{maybe add figure with complexity versus abs error?}
+
+% \todo{how does impairments on symbols (e.g. AWGN) translate to error in SBPS, and how does more samples in the algo (i.e. a bigger block) resolve
+% that in terms of accucary? Does it differ from traditional BPS systems?}
+
+
+\section{Spread estimation algorithm}
+\todo{explain the SE first, then the criteria for usable symbols, then input logic}
+Since SBPS only generates one phase estimation per block, and since the practical effects of laser linewidth drift are still
+present, only correcting the block with a single SBPS phase estimation would still not resolve this problem as may be seen
+in figure \todo{REF} \missingfigure{Only SBPS corrected, no SE correction (showcasing laser linewidth effects)}. A parallel calculation
+will estimate this residual phase spread across the block. This is done by raising the symbols to the fourth power, thereby removing
+the modulation and only keeping the true phase information. 
+\missingfigure{insert fig of constellation raised to fourth power}
+
+\subsection{Input symbol consideration}\label{input selector}
+
+\section{Phase unwrapping}
+\section{Phase compensation}
+
+\section{Expected performance}
+
+
+
