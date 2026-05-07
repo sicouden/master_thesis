@@ -286,7 +286,7 @@ The timing behaviour of the full chain, of one SBPS stage, and of the \textit{ro
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\linewidth]{figures/SBPS_timing.png}
+\includegraphics[width=0.8\linewidth]{figures/SBPS_timing.png} 
 \caption{Timing diagram of the full SBPS algorithm}
 \label{fig:timing-SBPS-full}
 \end{figure}
@@ -320,7 +320,7 @@ For 16QAM, the slicer supports both conventional axis-based decisions and an opt
 % SPREAD ESTIMATION
 % -------------------------------------------------------------
 \section{Spread estimation block}
-The hardware implementation is split up in the different operational sections of the algorithm, namely the input selector (1), fourth-power demodulators (2), the spread estimator (3), the sign estimator (4) and finally the filters (5). 
+The hardware implementation is split up in the different operational sections of the algorithm, namely the input selector (1), fourth-power calculators (2), the spread estimator (3) \& the sign estimator (4) and finally the filters (5). 
 The layout of these modules and their relative position is illustrated on Fig~\ref{fig:SE-top}. 
 Each section will individually discuss the modules in terms of its functional operation, dataflow and timing flow in order to get a clearer picture of the RTL implementation.
 
@@ -400,11 +400,12 @@ candidate symbols from different regions of the block.
 \caption{Functional diagram of the SE input selector}
 \label{fig:SE_input_selector_functional}
 \end{figure}
+\todo{are signal big enough to be readable?}
 
 The input selector operates on the full block of received symbols $ \bar{r} $, and outputs three candidate symbols $x$, $y$, and $z$, 
 corresponding to the first, middle, and last regions of the block, respectively. These candidates are subsequently used for spread and
 direction estimation.
-\\\\
+
 The selection process consists of three sequential steps:
 
 \begin{enumerate}
@@ -414,19 +415,19 @@ The selection process consists of three sequential steps:
 \end{enumerate}
 
 These steps are implemented by the \textit{n-type slicer}, \textit{cands\_valid\_combo}, and \textit{cand\_symbol\_latch} modules, respectively.
-\\\\
+
 Each region (first, middle, last) is processed by an independent \textit{n-type slicer}. 
 This module evaluates a small subset of symbols (three in this implementation) and determines 
 whether a suitable candidate is present. A symbol is considered valid if it lies on the inner or 
 outer ring of the constellation, which ensures reliable spread estimation (this criterion is further 
 elaborated in the algorithmic description of the spread estimator). The index of the first valid symbol 
 is returned via the \textit{cand\_idx} bus. If no valid candidate is found, the \textit{cands\_any} flag is deasserted.
-\\\\
+
 The \textit{cands\_valid\_combo} module evaluates the availability of candidates across the three regions.
 A valid combination is only accepted if at least two regions provide a candidate symbol. If this condition is not met,
  all candidate flags are suppressed. This constraint reduces the likelihood of unreliable spread or direction estimates, 
  which would otherwise arise from insufficient spatial information within the block.
-\\\\
+
 Finally, the \textit{cand\_symbol\_latch} module selects and outputs the candidate symbols. For each region where the 
 \textit{cands\_any} flag is asserted, the corresponding symbol is extracted from the input block using the provided 
 \textit{cand\_idx}. If valid candidates are present, the outputs are updated and the \textit{update} signal is asserted. 
@@ -436,10 +437,10 @@ when no valid candidate combination is available.
 \subsubsection{Timing flow}
 
 The timing behaviour of the input selector is illustrated in Figure~\ref{fig:SE_input_selector_timing}.
-\\\\
+
 The \textit{n-type slicer} requires two clock cycles to determine and register a valid candidate index. The subsequent 
 \textit{cands\_valid\_combo} stage introduces an additional cycle to produce stable validity signals.
-\\\\
+
 To ensure correct operation of the \textit{cand\_symbol\_latch}, all inputs must be temporally aligned. In particular, 
 the candidate indices and their corresponding validity flags must be synchronized with the original input symbols. To achieve this, 
 delay elements are inserted in the data path. The input symbol block $ \bar{r} $ is delayed by three clock cycles, matching the 
@@ -457,26 +458,253 @@ The \textit{cand\_symbol\_latch} itself introduces one additional clock cycle to
 As a result, the total latency of the input selector amounts to four clock cycles.
 
 \subsection{Fourth-power I/Q calculators}
+
 \subsubsection{Functional operation}
-The fourth-power calculators are an important part of the system. The type of calculations needed
-to perform a fourth-power on I/Q samples require multiplications, more of them than any other type of calculation
-that needs to be done for the low-complexity carrier recovery system. 
+
+The fourth-power calculators are an important part of the spread estimation algorithm. 
+The purpose of the fourth-power operation is to suppress the rotational symmetry of the modulation and 
+to make the carrier-induced phase evolution more directly observable.
+
+For a complex input sample
+\begin{equation}
+    r = I + jQ ,
+\end{equation}
+the block calculates
+\begin{equation}
+    r^4 = (I+jQ)^4 .
+\end{equation}
+The output is again represented as a complex value, with a real and imaginary component. 
+This operation is multiplication-heavy compared to most other operations in the low-complexity 
+carrier recovery system. This is relevant because fourth-power based frequency or spread 
+estimation is one of the computationally dominant operations in such systems: earlier work on 
+this carrier recovery approach explicitly identifies the complex fourth-power operation as a 
+large computation, requiring several real-valued multiplications per symbol 
+\cite{Jonas}.
 \\\\
+In this implementation, the input samples are provided as signed fixed-point values in Q1.15 
+format. The fourth-power output is not rescaled back to Q1.15, but is kept at a much larger 
+internal word length. This avoids unnecessary loss of precision in the following dot-product, 
+sign and angle-estimation calculations without significantly effecting the compute needed for those 
+calculations.
 
 \subsubsection{Data flow}
+
+Although the mathematical expression $r^4$ can be expanded directly, the hardware 
+implementation avoids calculating all fourth-order terms independently. Instead, the 
+calculation is structured as two consecutive squaring operations:
+$$
+    r^2 = (I+jQ)^2 = (I^2-Q^2) + j(2IQ).
+$$
+Defining
+$$
+    a = I^2 - Q^2,
+    \qquad
+    b = 2IQ,
+$$
+the fourth power becomes
+$$
+    r^4 = (r^2)^2 = (a+jb)^2 .
+$$
+
+This gives
+\begin{equation}
+    r^4 = (a^2-b^2) + j(2ab).
+\end{equation}
+
+The real and imaginary fourth-power outputs are therefore calculated as
+\begin{align}\label{eq:re_and_im_fourth_power}
+    \Re\{r^4\} &= a^2 - b^2, \\
+    \Im\{r^4\} &= 2ab.
+\end{align}
+
+This decomposition maps naturally onto a pipelined multiplier structure. The first stage 
+calculates the three second-order products $I^2$, $Q^2$ and $IQ$. From these values, the 
+second stage forms the intermediate real and imaginary components of $r^2$: $a=I^2-Q^2$ 
+and $b=2IQ$. The multiplication by two is implemented as a left shift, so no additional 
+multiplier is required. The third stage then calculates $a^2$, $b^2$ and $ab$. Finally, the 
+fourth stage combines these terms into the real and imaginary components of the fourth-power 
+output.
+
+The resulting implementation requires six real multiplications: three multiplications in the 
+first stage and three multiplications in the third stage. The remaining operations are 
+additions, subtractions and shifts. This is more efficient than a direct polynomial expansion 
+of $(I+jQ)^4$, because the intermediate square $r^2$ is reused.
+
+The bit growth is also handled explicitly. Since the input samples are signed values with 
+width $W$, the products $I^2$, $Q^2$ and $IQ$ require approximately $2W$ bits. The 
+intermediate values $a$ and $b$ require one additional bit, because $a$ is formed by a 
+subtraction and $b$ by a shift-left operation. Squaring $a$ and $b$ then doubles this width 
+again. For this reason, the output width is chosen conservatively as
+\begin{equation}
+    W_{\mathrm{out}} \geq 4W + 3 .
+\end{equation}
+For the default input width of $W=16$, this gives a required full-precision output width of 
+at least 67 bits. The implementation uses a default output width of 70 bits, which provides 
+additional margin and avoids overflow during the fourth-power calculation.
+
+The use of a large fourth-power output width is acceptable here because the block is only 
+applied to selected candidate symbols in the spread estimation path, rather than to every 
+symbol in every blind phase search test angle. This fits the broader objective of the proposed 
+architecture: reducing the number of expensive carrier recovery operations while preserving 
+enough phase information to improve tracking of residual frequency offset.
+
 \subsubsection{Timing flow}
+
+The fourth-power calculator is implemented as a four-stage registered pipeline. Figure~\ref{fig:SE-fourth-power} shows the calculation flow through these stages.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/SE_fourth_power_calculations.png}
+\caption{Calculation-flow of the fourth-power module}
+\label{fig:SE-fourth-power}
+\end{figure}
+
+Each block in the figure corresponds to one clocked pipeline stage. The first stage performs 
+the initial second-order products and registers the results internally. These intermediate 
+values are then forwarded to the second stage, where the intermediate complex representation of 
+the squared sample is formed.
+
+The third stage contains the second multiplication layer of the architecture. Here, the 
+intermediate terms generated in the previous stage are squared and multiplied again in 
+preparation for the final fourth-power reconstruction. In the fourth and final stage, the 
+real and imaginary outputs are assembled and driven to the output ports.
+
+A valid signal is propagated alongside the datapath through the internal pipeline control signals 
+\texttt{s1\_valid}, \texttt{s2\_valid}, \texttt{s3\_valid} and \texttt{s4\_valid}. This ensures that 
+the output validity remains aligned with the corresponding fourth-power result throughout the pipeline.
+
+The total latency of the module is therefore four clock cycles from assertion of \texttt{in\_valid} 
+to assertion of \texttt{out\_valid}.
+%  Once the pipeline is filled, however, a new fourth-power result 
+% can be produced every clock cycle. 
+
+% This means that the architecture achieves a throughput of one 
+% complex fourth-power operation per cycle, despite the relatively large number of required multiplications.
+
+% Distributing the arithmetic over multiple registered stages also significantly reduces the combinational path length. 
+% Instead of implementing all multiplications and additions in a single cycle, the operations are 
+% partitioned into smaller timing domains. This improves timing closure and allows the module to 
+% operate at higher clock frequencies, which is important in the context of high-speed coherent DSP 
+% implementations.
+
+\subsubsection{CORDIC-based alternative}
+
+A possible alternative implementation would be to use a CORDIC-based polar approach. In such 
+a design, the input sample would first be converted from Cartesian form to magnitude and 
+phase:
+\begin{equation}
+    r = |r|e^{j\phi}.
+\end{equation}
+The fourth power could then be calculated as
+\begin{equation}
+    r^4 = |r|^4 e^{j4\phi}.
+\end{equation}
+Conceptually, this is attractive because the phase multiplication by four is simple, and the 
+CORDIC algorithm is well suited for angle extraction and vector rotation.
+
+However, this approach is not necessarily beneficial in the context of this low-complexity 
+architecture. A CORDIC implementation would require an angle extraction step, additional 
+handling of the magnitude term, and a rotation or sine/cosine reconstruction step. This 
+introduces iterative logic, latency and control complexity. The fourth-power block used here, 
+by contrast, is a feed-forward arithmetic pipeline consisting only of multipliers, adders, 
+subtractors and shifts. It also produces exactly the Cartesian components required by the 
+following dot-product and sign-estimation logic.
+
+The main advantage of a CORDIC-based approach would be multiplier reduction, especially in 
+an FPGA design where DSP slices are scarce or already heavily used. Its main disadvantage is 
+that the algorithm becomes less direct: the system would temporarily move to a polar 
+representation, only to return to Cartesian components for the following processing stages. 
+For this design, the multiplier-based fourth-power calculator is therefore the considered implementation. It 
+keeps the data path simple, deterministic and easy to pipeline, while avoiding the additional 
+latency and format conversions of a CORDIC-based solution.
 
 \subsection{Spread estimation}
+\label{subsec:spread-estimation}
+
+This subsection describes the part of the spread-estimation backend that calculates the absolute 
+phase-spread estimate. The focus here is the computation from a pair of selected complex samples to the unsigned angle estimate \( |\theta| \).
+
 \subsubsection{Functional operation}
-\begin{enumerate}
-    \item compute dotproduct  
-    \item compute denumerator (inner + outer flags go to radius LUT with as output inversed reciprocal multiplication factors) \todo{important, explain well!}
-    \item multiplication of dotproduct with rec. mult. factor to produce $ \cos(|4\theta|) $. 
-    \item $ \arccos $ LUT
-\end{enumerate}
+
+After the selected samples have been raised to the fourth power, the spread-estimation block calculates the angle between the two resulting complex vectors. Let
+\[
+    r_0^{(4)} = I_0^{(4)} + jQ_0^{(4)}, \qquad
+    r_1^{(4)} = I_1^{(4)} + jQ_1^{(4)} .
+\]
+where $ I_x{(4)} $ and $ Q_x^{(4)} $ are the real and imaginary part respectively as also seen from equation~\ref{eq:re_and_im_fourth_power}.
+The numerator of the cosine estimate is the dot product of these two fourth-power vectors:
+\[
+    N = I_0^{(4)} I_1^{(4)} + Q_0^{(4)} Q_1^{(4)} .
+\]
+This dot product is proportional to
+\[
+    |r_0^{(4)}|\,|r_1^{(4)}|\cos(4|\theta|),
+\]
+so the required normalization factor is the reciprocal of the product of the two fourth-power vector magnitudes.
+
+For the 16-QAM constellation used here, the denominator is not computed with a run-time divider. Instead, each sample is classified as belonging to the inner or outer diagonal radius of the constellation. The two inner/outer flags address a small radius-product LUT. This LUT directly returns a precomputed reciprocal multiplication factor for the possible radius products:
+\[
+    R^{-1}_{\mathrm{II}}, \qquad
+    R^{-1}_{\mathrm{IO}}, \qquad
+    R^{-1}_{\mathrm{OO}} .
+\]
+The reciprocal factors are scaled fixed-point constants, so the normalization is implemented as one signed multiplication followed by an arithmetic right shift. The result is saturated to the interval representable by Q1.31 and represents
+\[
+    x = \cos(4|\theta|).
+\]
+\todo{Add a small diagram showing the two parallel paths: fourth-power dot product and inner/outer reciprocal LUT, joining at the reciprocal multiplication.}
+
+The final conversion from \(x\) to an angle is performed by an arccosine LUT. Since the desired output is
+\[
+    |\theta| = \frac{1}{4}\arccos(x),
+\]
+the LUT stores \(\arccos(x)/4\) rather than \(\arccos(x)\). Only the half-domain \(x \in [0,1]\) is stored. For negative inputs, the symmetry
+\[
+    \frac{\arccos(-x)}{4}
+    = \frac{\pi}{4} - \frac{\arccos(x)}{4}
+\]
+is used to reconstruct the correct value. The output of this stage is therefore the absolute phase-spread estimate \( |\theta| \), limited to the range \(0 \leq |\theta| \leq \pi/4\).
+
+\todo{Add a plot of the stored LUT function \(\arccos(x)/4\) for \(x \in [0,1]\), together with the symmetry reconstruction for \(x < 0\).}
 
 \subsubsection{Data flow}
+
+The spread-estimation calculation is implemented as a fixed-point pipeline. The selected input samples are signed \(G_{\mathrm{sample}}\)-bit values. In the current implementation this corresponds to 16-bit signed I/Q samples. The fourth-power stage produces signed real and imaginary components with width \(G_{\mathrm{pow4}}\). These components are kept at an extended precision because the subsequent dot product multiplies two fourth-power values.
+
+The dot-product output has width \(2G_{\mathrm{pow4}}+1\) and is signed, since the angle between the two fourth-power vectors can produce a negative cosine. In parallel, the delayed original I/Q samples are converted into inner/outer radius flags. The radius-product LUT outputs a signed 48-bit reciprocal factor. The constants are scaled such that multiplying the dot product by the LUT value and shifting right by \(G_{\mathrm{inv\_frac}}\) fractional bits produces a normalized Q1.31 value.
+
+The normalized value is interpreted as a signed Q1.31 representation of \( \cos(4|\theta|) \). Before addressing the arccosine LUT, the absolute value is taken. The special case \(x=-1\) is saturated to the largest positive Q1.31 value before taking the absolute value, avoiding overflow in two's-complement representation. The LUT address is formed from the upper fractional bits of \(|x|\), specifically bits 30 down to 19, giving a 12-bit address and therefore 4096 table entries.
+
+The arccosine LUT output is also Q1.31. It stores \(\arccos(|x|)/4\) for non-negative input magnitudes. A delayed sign bit from the original Q1.31 cosine value selects either the direct LUT output or the reconstructed value \(\pi/4-\mathrm{LUT}(|x|)\). Thus the final output is a signed Q1.31 number, but it represents the non-negative angle \( |\theta| \).
+
+\todo{Add a fixed-point data-flow diagram with signal widths: input samples, fourth-power outputs, dot product, reciprocal LUT output, Q1.31 cosine, LUT address and Q1.31 angle.}
+
 \subsubsection{Timing flow}
+
+The block is fully pipelined. Once the pipeline is filled, a new valid sample pair can be accepted every clock cycle, provided both input-valid signals are asserted. The latency from the selected input pair to the \( |\theta| \) output is eight clock cycles in the current implementation.
+
+\begin{table}[h]
+    \centering
+    \caption{Pipeline latency of the absolute spread-estimation calculation.}
+    \label{tab:spread-estimation-latency}
+    \begin{tabular}{lcc}
+        \hline
+        Block & Incremental latency & Cumulative latency \\
+        \hline
+        Fourth-power pipeline & 4 clk & 4 clk \\
+        Dot product & 1 clk & 5 clk \\
+        I/Q delay for denominator path & 3 clk & 3 clk \\
+        Inner/outer flag generation & 1 clk & 4 clk \\
+        Radius-product reciprocal LUT & 1 clk & 5 clk \\
+        Reciprocal multiplication and saturation & 1 clk & 6 clk \\
+        Arccos LUT address, BRAM read and sign alignment & 2 clk & 8 clk \\
+        \hline
+    \end{tabular}
+\end{table}
+
+The fourth-power dot-product path and the denominator-reciprocal path are explicitly balanced. The denominator path starts with a three-clock delay of the original I/Q samples so that its reciprocal factor becomes valid in the same clock cycle as the dot product. The reciprocal multiplication stage only asserts its output-valid signal when both the dot product and the reciprocal factor are valid. The arccosine stage then adds two clocks, matching the LUT read latency and the delayed sign/valid signals used for half-domain reconstruction.
+
+\todo{Add a timing diagram showing valid propagation through the dot-product path, reciprocal-denominator path, reciprocal multiplier and arccos LUT.}
 
 \subsection{Sign estimation}
 \subsubsection{Functional operation}

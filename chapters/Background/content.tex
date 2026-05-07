@@ -365,7 +365,7 @@ commonly implemented digitally using feed-forward and/or decision-directed algor
 which avoids tight analogue loop dynamics and integrates naturally with polarization-diverse
 digital processing \cite{Savory2010JSTQE,IpKahn2007JLT,Pfau2009JLT}.
 
-\section{Phase noise and frequency offset}
+\section{Phase noise and frequency offset}\label{phase noise and frequency offset}
 The main phase-related impairments in coherent optical communication systems are carrier
 frequency offset (CFO) and phase noise. Both arise because the transmitter and local
 oscillator lasers are independent devices and therefore do not share an identical optical
@@ -410,6 +410,7 @@ phase drift across each DSP block.
 of the total noise process ($ \Delta f = 16 \text{MHz} $, dnu = $ 0.1 \text{MHz} $, baud = $ 32 \text{GBaud} $)}
 \label{fig:linear_approx}
 \end{figure}
+\todo{clean up figure, legend}
 
 
 The phase recovery system must therefore not only compensate random phase noise caused by
@@ -449,7 +450,7 @@ residual offset is too large, the phase recovery block may no longer be able to 
 constellation rotation correctly, which increases the probability of cycle slips
 \cite{Pfau2009JLT,Kuschnerov2009JLT}.
 
-\section{Carrier recovery in DSP chains}
+\section{Carrier recovery in DSP chains}\label{carrier recovery in DSP chains}
 Carrier recovery is the DSP stage responsible for compensating the phase rotations
 introduced by residual CFO and phase noise. Since these impairments have different
 characteristics, coherent receivers commonly separate carrier recovery into (i) frequency
