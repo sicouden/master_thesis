@@ -22,3 +22,5 @@
 \acro{ASE}{amplified spontaneous emission}
 \acro{FFT}{fast fourier-transform}
 \acro{MUX}{multiplexer}
+\acro{I/Q}{In-phase/Quadrature}
+\acro{AWGN}{additive white Gaussian noise}

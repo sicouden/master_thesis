@@ -8,10 +8,318 @@ testbenches
 block diagrams
 
 \section{System overview}
+% \section{Data representation and scaling}
+
+% \todo{explain why  samples are in I/Q fxp, and testangles are cos/sin fxp (more difficult to calculate angles with,
+% easier to apply angles to samples)}
+
+% In this section, decisions regarding the data representation are explained, motivated and discussed. First, the 
+% representation of a sample $ r $ is explained. In some sections of the algorithm, data representation of $ r $ is switched 
+% for easy of manipulation. This will also be discussed. After that, angles for which the samples are rotated are explained. 
+
+% Samples $ r $ are the input symbols that undergo the bulk of the mathematical manipulation in the alogritm. So, efficient 
+% hardware mapping is essential to keeping the manipulations low-complexity. 
+
+% The samples are representative of a normalized 16QAM constellation diagram. The 16 different constellation points can 
+% be represented using the following four values in $(I,Q)$ combinations:
+
+% \begin{equation}
+%     +s \qquad -s \qquad +3s \qquad -3s
+% \end{equation}
+
+% To normalize these to 1 (explain more what this means?), $ s $ is taken to be the scaling factor $ 1/\sqrt{10} $. 
+
+% Since the integer-range is limited for constrained hardware-implemented designs, here too, is the data representation limited
+% to the 16-bit range of (insert max). (explain fixed-point decision)
+
+% to make full use of this integer range, the possible maximum and minimum values of the impaired samples need to be considered. 
+
+% The most maximum values that could be realised when considering only phase-impaired (i.e. the pure rotation of a sample in terms of I and Q due to CFO and laser-linewidth)
+% is for an outer-most point $(\pm 3s, \pm 3s)$. These type of point have the largest magnitude, and rotating them to the axis would yield a 
+% maximum magnitude of (calculate, it is something more that 3s). This would have to be appropriately modeled, otherwise the clipping would
+% cause local minima for the error-calculation in SBPS calculation (section~\ref{sec:Serialized binary phase search}) and the true phase 
+% would not be representable with clipping. It would lead to a different estimated phase. 
+
+% \missingfigure{clipping of a 16QAM diagram}
+
+% Furthermore, AWGN-noise also impairs the magnitude of the samples. A maximum range of the integers only representing the phase-noise would
+% insufficient to not clip under AWGN impairments. So, a scaling factor is also taken into account. Preferably, the scaling factor would be
+% proportional to the SNR of a signal to dynamically alter the representative domain of the samples. But, due to the scope of this thesis, this
+% path is not persued. Instead, a fixed value of is assumed. (idk what value anymore..?)
+
+% Considering the pure rotation of the outer-most sample to the axis, and AWGN causing magnitude shifts, a total static scaling factor
+% of $ \alpha = 0.678 $ is chosen. 
+
+% So, for the total integer range in the 16-bit architecture range, a normalized and scaled constellation points are 
+% present at $ \pm 1*7025, \qquad \pm 3*7025. 
+
+% Figure \todo{insert figure reference} shows the different SNR, where under low SNR scenario's, clipping starts to occur. Thus, impairing
+% the accuracy of the estimated phases and althus the effectiveness of the architecture.
+
+% \missingfigure{showcasing SNR and clipping}
+
+
 \section{Data representation and scaling}
 
-explain why  samples are in I/Q fxp, and testangles are cos/sin fxp (more difficult to calculate angles with,
-easier to apply angles to samples)
+In this section, the data representation choices used throughout the hardware architecture are discussed and motivated.
+Because the proposed carrier recovery system is implemented entirely in digital hardware, the numerical representation
+of both the received samples and the phase-rotation coefficients has a direct impact on the achievable accuracy, hardware
+complexity and resource utilization.
+
+\subsubsection{sample representation}
+
+First, the representation of the received samples $r$ is discussed. Afterwards, the representation of the phase-rotation
+coefficients used throughout the \ac{SBPS} and phase compensation stages is explained.
+
+The received symbols are represented in Cartesian form as complex \ac{I/Q} samples:
+
+\begin{equation}
+r = I + jQ
+\end{equation}
+
+where both $I$ and $Q$ are stored using signed fixed-point arithmetic. Cartesian \ac{I/Q} representation is preferred
+over magnitude-phase representation because the majority of the DSP operations in the architecture consist of additions,
+multiplications and comparisons on the real and imaginary components. These operations map efficiently onto FPGA DSP slices
+and LUT-based arithmetic structures.
+
+Furthermore, phase rotations in coherent DSP are naturally implemented using complex multiplication:
+
+\begin{equation}
+r' = r \cdot e^{-j\phi}
+\end{equation}
+
+Expanding this into Cartesian form yields:
+
+\begin{equation}\label{eq:cartesian-rotation}
+I' = I\cos(\phi) + Q\sin(\phi), \qquad
+Q' = -I\sin(\phi) + Q\cos(\phi)
+\end{equation}
+
+As a result, the phase-rotation coefficients are represented directly as fixed-point cosine and sine values rather than as
+angles themselves. While storing the phase as an angle would simplify interpretation, it would require costly trigonometric
+operations whenever a rotation has to be applied. By representing the phase coefficients directly as
+$\cos(\phi)$ and $\sin(\phi)$, the hardware implementation only requires multiplications and additions during rotation.
+
+The received symbols correspond to a normalized 16QAM constellation. For a square 16QAM constellation, the possible in-phase
+and quadrature amplitudes are:
+
+\begin{equation}
+\pm s \qquad \pm 3s
+\end{equation}
+
+resulting in constellation points formed by all possible $(I,Q)$ combinations of these values.
+
+To normalize the average constellation power to unity, the scaling factor $s$ is chosen as:
+
+\begin{equation}
+s = \frac{1}{\sqrt{10}}
+\end{equation}
+
+This normalization ensures that the average symbol energy equals one:
+
+\begin{equation}
+\mathbb{E}[|r|^2] = 1
+\end{equation}
+
+which is convenient for both simulation and hardware verification, since impairments such as \ac{SNR}, linewidth and residual
+frequency offset can then be expressed independently of the constellation scaling.
+
+\subsubsection{sample scaling}
+Because FPGA resources and datapaths are finite, all samples are represented using fixed-point arithmetic instead of floating-point
+representations. Floating-point arithmetic would significantly increase the hardware complexity, routing overhead and power consumption
+of the design. Fixed-point arithmetic, on the other hand, allows efficient mapping onto FPGA DSP resources while still providing
+sufficient numerical precision for the considered coherent optical communication scenarios.
+
+In this work, the received \ac{I/Q} samples are represented using signed Q1.15 fixed-point format. This corresponds to a
+16-bit signed integer representation with one sign/integer bit and 15 fractional bits. The representable range is therefore:
+
+\begin{equation}
+-1 \leq x < 1
+\end{equation}
+
+Before mapping the constellation onto this range, the maximum possible signal excursion under phase rotation must first be considered.
+
+The outer-most 16QAM constellation points are located at:
+
+\begin{equation}
+(\pm 3s,\pm 3s)
+\end{equation}
+
+These points have the largest magnitude:
+
+\begin{equation}
+|r_{\text{max}}| = \sqrt{(3s)^2 + (3s)^2}
+= 3\sqrt{2}s
+\end{equation}
+
+Substituting $s = 1/\sqrt{10}$ yields:
+
+\begin{equation}
+|r_{\text{max}}| \approx 1.34
+\end{equation}
+
+This means that a pure phase rotation of the outer-most constellation points can already produce instantaneous
+$I$ or $Q$ values larger than unity when the constellation aligns with one of the axes.
+
+If this effect were not taken into account, clipping would occur during phase rotation. Such clipping is especially problematic
+for the \ac{SBPS} metric calculations, since the Euclidean-distance calculations would no longer correctly represent the actual
+distance to the ideal constellation points. As a result, false local minima could appear in the error function, potentially causing
+incorrect phase estimation (as seen in Figure~\ref{fig:clipping_false_minima}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/clipping_false_minima.png}
+\caption{Clipping causing false minima for SBPS metric}
+\label{fig:clipping_false_minima}
+\end{figure}
+
+Besides phase rotation, \ac{AWGN} can further increase the instantaneous sample magnitude.
+Designing the fixed-point range only for ideal phase-rotated constellation points would therefore still result in clipping
+under low-\ac{SNR} conditions.
+
+Ideally, the constellation scaling would adapt dynamically to the received signal quality such that the available integer range
+is optimally utilized for every \ac{SNR}. However, implementing such adaptive scaling falls outside the scope of this thesis.
+Instead, a fixed scaling factor is used throughout the architecture.
+
+Taking into account both the maximum phase-rotated constellation magnitude and additional noise excursions, a static scaling factor
+of
+
+\begin{equation}
+\alpha = 0.678
+\end{equation}
+
+is selected.
+
+Using this scaling factor, the normalized constellation points are mapped onto the Q1.15 integer range as:
+
+\begin{equation}
+\pm 7025 \qquad \pm 3 \cdot 7025
+\end{equation}
+
+This scaling provides sufficient headroom for phase rotations and moderate noise excursions while still maintaining adequate
+fixed-point precision for the DSP 16-bit operations.
+
+Figure~\ref{fig:clipping_constellation} illustrates the effect of different \ac{SNR} conditions on the fixed-point representation, including the scaling factor $\alpha$.
+At sufficiently low \ac{SNR}, the noisy constellation points exceed the representable range and clipping occurs. This clipping
+degrades the accuracy of both the \ac{SBPS} metric calculations and the spread estimation calculations, ultimately reducing the
+phase recovery performance of the architecture.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/clipping_fxp_representation.png}
+\caption{Clipping of 16QAM symbols under different SNR conditions}
+\label{fig:clipping_constellation}
+\end{figure}
+
+% \subsubsection{phase representation}
+% The phase coefficients used throughout the architecture are represented separately from the received samples. Since these coefficients
+% correspond to sine and cosine values, their magnitude is inherently bounded between $-1$ and $1$. In the SBPS module, these coefficients are 
+% represented in Q1.15 format. Trigonometric represention are inherently less complex to rotate samples with, but also more complex to manipulate 
+% the phase itself with. A phase addition $ \phi_e + \theta $ would need to be done in trigonometric form as:
+% \todo{insert equation}
+% whereas, representing as a phase word would require for this only one addition. This is for SBPS not a problem, since all phase manipulations 
+% can be done in sythesis. The iterative testangles are static in runtime, so a simple LUT is used for the different stage angles in trigonometric form. 
+
+% But, the successive modules such as the phase unwrapper and phase compensation all require phase manipulation (i.e. calculating the leading/lagging phase).
+% Even the CORDIC IP used in the phase compensation stage offers phase wording input instead of trigonometric form. 
+
+% The spread estimation module also inherently calculates the phase as a phase word instead of trigonometric, since the fourth-power followed by the dotproduct 
+% is phase word in principle. Converting these equations to a trigonometric implemention would look like: (insert what that would look like)
+
+% This increases considerably the complexity. 
+
+% So, keeping in mind the pipeline stages, the fact that also SE produces a phase word as output. SBPS works for efficiency's sake with trigonometric phase representation, 
+% but for the rest of the pipeline this is converted to a phase word, using the CORDIC algorithm. This is done via 
+% (explain short the calculation process for phae word to sin/cos representation). The total overview of the data representations between modules is given in figure \todo{insert ref}
+
+
+% The use of separate fixed-point formats for received samples and phase coefficients therefore represents a trade-off between arithmetic precision,
+% resource utilization and routing complexity within the FPGA implementation.
+
+\subsubsection{Phase representation}
+
+The phase-related quantities used throughout the architecture are represented separately from the received \ac{I/Q} samples. 
+Depending on the type of operation being performed, two different phase representations are used throughout the pipeline:
+
+\begin{enumerate}
+    \item trigonometric representation using $\cos(\phi)$ and $\sin(\phi)$
+    \item direct phase-word representation using an angle $\phi$
+\end{enumerate}
+
+Both representations have advantages and disadvantages in terms of hardware complexity and ease of manipulation.
+
+The trigonometric representation is inherently well-suited for applying phase rotations to complex samples. 
+A rotation over phase $\phi$ can directly be implemented as seen in equation~\ref{eq:cartesian-rotation},
+meaning that only multiplications and additions are required. This maps efficiently onto FPGA DSP slices and avoids the need 
+for expensive real-time trigonometric calculations.
+
+For this reason, the \ac{SBPS} stages internally use phase coefficients represented directly as fixed-point sine and cosine values. 
+Since both $\sin(\phi)$ and $\cos(\phi)$ are bounded between $-1$ and $1$, these coefficients are represented using signed Q1.15 
+fixed-point format.
+
+However, while trigonometric representation is efficient for applying rotations, it is considerably less convenient for manipulating 
+the phase itself. Operations such as phase accumulation or phase interpolation become significantly more complex when the phase is stored 
+as sine and cosine coefficients.
+
+For example, adding two phase terms $\phi_e$ and $\theta$ in trigonometric form requires the angle-sum identities:
+
+\begin{align}
+    \cos(\phi_e + \theta)
+    &= \cos(\phi_e)\cos(\theta) - \sin(\phi_e)\sin(\theta)
+    \\
+    \sin(\phi_e + \theta)
+    &= \sin(\phi_e)\cos(\theta) + \cos(\phi_e)\sin(\theta)
+\end{align}
+
+Rather than requiring a single addition, this operation now requires four multiplications and multiple additions. 
+In contrast, when the phase is represented directly as a phase word, the same operation simply becomes:
+
+\begin{equation}
+    \phi_{\text{new}} = \phi_e + \theta
+\end{equation}
+
+which only requires an adder.
+
+Within the \ac{SBPS} module, this limitation is not problematic. The iterative test angles are static during runtime and are fully 
+known at synthesis time. Therefore, all required sine and cosine coefficients can be precomputed and stored in small lookup tables. 
+The different stage rotations, such as $\pm \pi/8$, $\pm \pi/16$ and subsequent refinements, are thus directly available in 
+trigonometric form without requiring any runtime phase calculations.
+
+The later pipeline stages, however, rely heavily on direct phase manipulation. The phase unwrapper calculates leading and lagging 
+phase estimates, while the phase compensation stage interpolates phase values across the different sections of a block. These operations 
+all naturally operate on phase words rather than trigonometric coefficients.
+
+Furthermore, the \ac{CORDIC} IP used in the phase compensation stage also accepts phase-word inputs directly. This makes phase-word 
+representation considerably more efficient for the downstream processing stages.
+
+The spread estimation (\ac{SE}) module also inherently produces a phase-word representation. After the fourth-power operation removes 
+the modulation, the phase spread is estimated using a normalized dot product (equation~\ref{eq:spread-cos}) 
+followed by an arccosine operation (equation~\ref{eq:spread-mag}).
+
+The output of this operation is fundamentally an angle estimate represented as a phase word. Representing this entire operation directly 
+in trigonometric form would require repeated conversions between angular and Cartesian domains, significantly increasing the arithmetic complexity.
+
+Taking into account the complete pipeline structure, a mixed representation strategy is therefore adopted. The \ac{SBPS} stages use 
+trigonometric phase representation because their primary purpose is efficient sample rotation using static test angles. The downstream 
+pipeline stages, however, use direct phase-word representation because they require frequent phase manipulations and interpolations.
+
+To bridge both domains, the final \ac{SBPS} output coefficients are converted from trigonometric form into a phase word using a 
+\ac{CORDIC}-based vectoring operation. 
+% In vectoring mode, the \ac{CORDIC} algorithm iteratively rotates the input vector toward the 
+% real axis while accumulating the applied rotation angle. The resulting accumulated angle corresponds to the phase estimate of the input vector:
+
+% \begin{equation}
+%     \phi = \arctan\left(\frac{Q}{I}\right)
+% \end{equation}
+
+% This phase word is then used throughout the remainder of the pipeline for phase unwrapping and phase compensation.
+
+The overall flow of phase representations between the different modules is illustrated in 
+Figure~\todo{insert figure reference}.
+
+The use of separate fixed-point formats and phase representations therefore represents a trade-off between arithmetic precision, 
+resource utilization and implementation complexity within the FPGA architecture.
+
 
 % \section{Architecture}
 % \subsection{Serialized blind phase search block}
@@ -178,7 +486,7 @@ easier to apply angles to samples)
 
 
 
-\section{Serialized blind phase search block}
+\section{Serialized binary phase search block}
 
 The hardware implementation follows a staged refinement architecture, shown in Fig.~\ref{fig:functional-SBPS}. The same received block
 \[
