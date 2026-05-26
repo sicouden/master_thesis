@@ -407,10 +407,9 @@ phase drift across each DSP block.
 \centering
 \includegraphics[width=1\linewidth]{figures/linear_approx.png}
 \caption{Near-lineair approximation
-of the total noise process ($ \Delta f = 16 \text{MHz} $, dnu = $ 0.1 \text{MHz} $, baud = $ 32 \text{GBaud} $)}
+of the total noise process}
 \label{fig:linear_approx}
 \end{figure}
-\todo{clean up figure, legend}
 
 
 The phase recovery system must therefore not only compensate random phase noise caused by
@@ -441,10 +440,10 @@ simple bin-centred peak estimate implies an error on the order of half a frequen
 \begin{figure}[H]
 \centering
 \includegraphics[width=1\linewidth]{figures/FFT-resolution.png}
-\caption{FFT-binsize leading to residual phase offset ($ F_s = 32 \text{GHz} $, $ N_{FFT} = 2048 $)}
+\caption{FFT-binsize leading to residual phase offset }
 \label{fig:FFT-resolution}
 \end{figure}
-
+%$ F_s = 32 \text{GHz} $, $ N_{FFT} = 2048 $
 This remaining frequency error is then passed on to the phase recovery stage. If the
 residual offset is too large, the phase recovery block may no longer be able to track the
 constellation rotation correctly, which increases the probability of cycle slips

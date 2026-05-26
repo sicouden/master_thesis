@@ -1,9 +1,43 @@
 \chapter{Conclusion}\label{Conclusion}
 
 \section{Summary}
-\section{Achieved objectives}
-\section{Future work}
 
+This thesis investigated the hardware implementation of a low-complexity carrier-recovery backend for baudrate-sampled \ac{16QAM} coherent optical links. The motivation was the increasing complexity of carrier recovery in high-throughput coherent receivers, where conventional blind phase search provides robust phase estimation but requires many candidate rotations and metric evaluations. The proposed architecture reduces this cost by using a serialised binary phase-search structure and augments it with spread estimation so that residual intra-block phase evolution can still be compensated.
 
+The work first described the phase-recovery algorithm from a system perspective. The \ac{SBPS} block estimates the wrapped centre phase of a processing block, while the \ac{SE} block estimates the signed phase spread across that block. The phase unwrapper then maintains the correct quadrant branch between successive blocks, and the phase compensator applies a section-based correction across the delayed input block. This division of work is central to the architecture: \ac{SBPS} provides a robust phase anchor, while \ac{SE} reduces the residual edge error caused by residual \ac{CFO}.
 
+The main contribution of this thesis is the translation of this algorithmic structure into a complete fixed-point \ac{FPGA} implementation. The implementation uses Q1.15 packed I/Q samples, trigonometric phase coefficients in the \ac{SBPS} path, Q4.28 phase words in the unwrapping and compensation path, and CORDIC-based rotation in the final correction stage. Within this implementation, the spread-estimation branch was developed as a hardware datapath with candidate-symbol selection, fourth-power processing, normalized dot-product evaluation, sign estimation, filtering and \ac{LUT}-based angle recovery. These blocks are integrated in a top design where the raw input block is processed in parallel by \ac{SBPS} and \ac{SE}, while an explicit I/Q delay line preserves the corresponding sample block for the final \textit{PUPC} correction stage.
 
+A second contribution is the verification and evaluation framework around this implementation. Python reference models, fixed-point vector generation, \ac{VHDL} testbenches and post-processing scripts were used to validate both individual arithmetic paths and the complete wrapper. The top-level comparison showed no persistent phase drift between the Python model and \ac{RTL}; the largest measured mean model difference was 2.251 mrad over the evaluated cases, which is small compared with the intra-block phase drift that must be compensated.
+
+The system-level results confirmed the purpose of the spread-estimation path. In the default test case, the impaired signal had an \ac{EVM} of 142\%. Applying only the blockwise \ac{SBPS} correction reduced this to 12.69\%, while the combined \ac{SBPS}+\ac{SE} correction reduced it further to 7.41\%. Error-localisation plots showed that the additional spread compensation mainly improves the first and last symbols of the block, as expected from a correction method that targets intra-block phase slope.
+
+\section{Achieved Objectives}
+
+The first objective was to implement the proposed low-complexity carrier-recovery architecture on an \ac{FPGA}. This objective was achieved by implementing the \ac{SBPS}, \ac{SE}, phase-unwrapping and phase-compensation paths as a complete fixed-point \ac{RTL} design. The resulting top-level wrapper connects the estimators and correction stage through explicit latency-alignment blocks, making the full processing chain available for simulation and implementation.
+
+The second objective was to preserve the intended algorithmic behaviour under fixed-point hardware constraints. The block-level and top-level verification results show that the \ac{RTL} follows the reference behaviour closely enough for system-level interpretation. The remaining differences are consistent with fixed-point quantisation, \ac{LUT}-based arccosine approximation, coefficient quantisation and CORDIC rounding. No systematic phase bias was observed in the evaluated top-level cases.
+
+The third objective was to evaluate the trade-off between receiver performance and hardware cost. The stage-count sweep showed that increasing the \ac{SBPS} depth gives the largest benefit up to approximately six stages for the evaluated configuration. Beyond this point, the remaining error is dominated by spread-estimation error, linewidth-induced phase variation and compensation granularity rather than by centre-phase search resolution. The compensation-section sweep showed a similar saturation: moving from one section to multiple sections gives a clear improvement, but the gain becomes smaller beyond eight sections.
+
+The fourth objective was to assess whether the design can be implemented with realistic timing. The evaluated \(B=32\), six-stage, eight-section configuration used about \(33.3\mathrm{k}\) LUTs, \(36.0\mathrm{k}\) flip-flops, 229 DSP blocks and four BRAM tiles on the XCU200 device. A local timing fix in the spread-estimation reciprocal-multiplication path allowed the design to close timing at an \(8~\mathrm{ns}\) clock period, corresponding to 125 MHz, with negligible additional area.
+
+Overall, the thesis demonstrates that the proposed \ac{SBPS}+\ac{SE} architecture is implementable as a complete fixed-point \ac{FPGA} datapath and that the spread-estimation extension provides a measurable performance benefit over \ac{SBPS}-only blockwise correction under the evaluated residual-\ac{CFO} conditions.
+
+\section{Main Contributions}
+
+The contributions of this thesis can be summarized as a coherent implementation path from algorithm to measured hardware design. Starting from the proposed \ac{SBPS}+\ac{SE} concept, the work develops a fixed-point \ac{RTL} receiver backend in which the centre-phase estimator, spread estimator, phase unwrapper and phase compensator are implemented as interacting hardware blocks rather than as isolated models.
+
+The spread-estimation path forms the most specific hardware contribution. It combines candidate-symbol selection, fourth-power arithmetic, normalized dot-product processing, sign estimation, filtering and \ac{LUT}-based angle recovery into a pipeline that produces a signed Q4.28 spread estimate. This estimate is then integrated with the \ac{SBPS} centre-phase estimate and the delayed I/Q samples through the top-level alignment structure described in Chapter~\ref{Hardware Implementation}.
+
+The final contribution is the validation and interpretation of the resulting design. The thesis establishes a reproducible Python-to-\ac{VHDL} verification flow and uses it to compare the fixed-point \ac{RTL} against reference behaviour. The performance and implementation results then connect algorithmic parameters, such as \ac{SBPS} stage count and compensation-section count, to \ac{EVM} improvement, latency, timing closure and resource usage.
+
+\section{Future Work}
+
+Several directions remain open for future work. A first extension is a more systematic fixed-point exploration. Although the design contains several generics, the verification flow in this thesis focused on one main Q1.15/Q4.28 configuration. Sweeping sample width, phase-word width, accumulator width and \ac{LUT} resolution would show which parts of the datapath are accuracy-limiting and which parts could be reduced to save area or power.
+
+The \ac{SBPS} rotation branches are another candidate for optimization. The current implementation uses multiplier-based rotations to keep stage latency predictable. A pipelined \ac{CORDIC}-based implementation could reduce DSP usage, but it would need a careful comparison of latency, register cost, numerical accuracy and top-level timing alignment.
+
+Future work should also consider a more streaming-oriented receiver integration. The present wrapper uses fixed valid pulses and deterministic delay lines, which is useful for verification, but a production receiver would require integration with the preceding equalization and frequency-recovery stages, continuous scheduling and possibly ready/valid backpressure.
+
+Finally, the architecture should be evaluated beyond the current \ac{16QAM} setting. Higher-order \ac{QAM} formats would require new candidate-selection rules, different normalization constants and possibly different modulation-removal logic. Extending the method in that direction would determine whether the same low-complexity carrier-recovery principle remains useful for future coherent datacenter links with higher spectral efficiency.

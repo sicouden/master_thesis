@@ -14,7 +14,12 @@
 \acro{CORDIC}{coordinate rotation digital computer}
 \acro{IP}{intellectual property}
 \acro{VHDL}{VHSIC Hardware Description Language}
+\acro{RTL}{register-transfer level}
 \acro{SNR}{signal-to-noise ratio}
+\acro{BER}{bit error rate}
+\acro{SER}{symbol error rate}
+\acro{EVM}{error vector magnitude}
+\acro{LSB}{least significant bit}
 \acro{LUT}{look-up table}
 \acro{CFO}{carrier frequency offset}
 \acro{VHSIC}{very high speed integrated circuit}
@@ -22,5 +27,7 @@
 \acro{ASE}{amplified spontaneous emission}
 \acro{FFT}{fast fourier-transform}
 \acro{MUX}{multiplexer}
-\acro{I/Q}{In-phase/Quadrature}
+\acro{I/Q}{in-phase/quadrature}
 \acro{AWGN}{additive white Gaussian noise}
+\acro{DUT}{design under test}
+\acro{LSB}{least significant bit}

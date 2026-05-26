@@ -1,13 +1,6 @@
 \chapter{Hardware implementation}\label{Hardware Implementation}
-Here you show:
-VHDL design
-bit widths
-latencies
-signals
-testbenches
-block diagrams
 
-\section{System overview}
+% \section{System overview}
 % \section{Data representation and scaling}
 
 % \todo{explain why  samples are in I/Q fxp, and testangles are cos/sin fxp (more difficult to calculate angles with,
@@ -77,7 +70,7 @@ The received symbols are represented in Cartesian form as complex \ac{I/Q} sampl
 r = I + jQ
 \end{equation}
 
-where both $I$ and $Q$ are stored using signed fixed-point arithmetic. Cartesian \ac{I/Q} representation is preferred
+where both $I$ and $Q$ are stored using signed fixed-point formats. Cartesian \ac{I/Q} representation is preferred
 over magnitude-phase representation because the majority of the DSP operations in the architecture consist of additions,
 multiplications and comparisons on the real and imaginary components. These operations map efficiently onto FPGA DSP slices
 and LUT-based arithmetic structures.
@@ -125,8 +118,7 @@ which is convenient for both simulation and hardware verification, since impairm
 frequency offset can then be expressed independently of the constellation scaling.
 
 \subsubsection{sample scaling}
-Because FPGA resources and datapaths are finite, all samples are represented using fixed-point arithmetic instead of floating-point
-representations. Floating-point arithmetic would significantly increase the hardware complexity, routing overhead and power consumption
+Because FPGA resources and datapaths are limited, all samples are represented using fixed-point formats. Floating-point arithmetic would significantly increase the hardware complexity, routing overhead and power consumption
 of the design. Fixed-point arithmetic, on the other hand, allows efficient mapping onto FPGA DSP resources while still providing
 sufficient numerical precision for the considered coherent optical communication scenarios.
 
@@ -168,7 +160,7 @@ incorrect phase estimation (as seen in Figure~\ref{fig:clipping_false_minima}).
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\linewidth]{figures/clipping_false_minima.png}
+\includegraphics[width=1\linewidth]{figures/clipping_false_minima.png}
 \caption{Clipping causing false minima for SBPS metric}
 \label{fig:clipping_false_minima}
 \end{figure}
@@ -315,7 +307,14 @@ To bridge both domains, the final \ac{SBPS} output coefficients are converted fr
 % This phase word is then used throughout the remainder of the pipeline for phase unwrapping and phase compensation.
 
 The overall flow of phase representations between the different modules is illustrated in 
-Figure~\todo{insert figure reference}.
+Figure~\ref{fig:dataflow-top}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/dataflow_top}
+\caption{Data-representation throughout the top design}
+\label{fig:dataflow-top}
+\end{figure}
 
 The use of separate fixed-point formats and phase representations therefore represents a trade-off between arithmetic precision, 
 resource utilization and implementation complexity within the FPGA architecture.
@@ -518,7 +517,7 @@ Figure~\ref{fig:functional-SBPS-stage} shows the internal organisation of a sing
 \label{fig:functional-SBPS-stage}
 \end{figure}
 
-The \textit{rotate metric slice} unit is the core computational block of the design and is detailed in Fig.~\ref{fig:functional-rotate-slice-metric}. For every symbol in the block, the candidate phase is used to rotate the received sample, the rotated sample is sliced to the nearest constellation point, and the squared Euclidean distance between the rotated and sliced values is computed. These per-symbol errors are then accumulated over the full block window to obtain a single decision metric for the branch. All symbols in the block are therefore processed in parallel inside each branch, while the serial refinement occurs across the SBPS stages.
+The \textit{rotate metric slice} unit is the core computational block of the design and is detailed in Fig.~\ref{fig:functional-rotate-slice-metric}. For every symbol in the block, the candidate phase is used to rotate the received sample, the rotated sample is sliced to a reference constellation point, and the squared Euclidean distance between the rotated and sliced values is computed. In the normal stages this reference is the nearest 16QAM point. In the first radius-directed stages, the slicer uses the modified decision rule discussed in Subsection~\ref{subsec:sbps-pattern-effect}. The resulting per-symbol errors are accumulated over the full block window to obtain a single decision metric for the branch. All symbols in the block are therefore processed in parallel inside each branch, while the serial refinement occurs across the SBPS stages.
 
 \begin{figure}[H]
 \centering
@@ -592,12 +591,6 @@ This accumulated metric is the quantity used by the \textit{min metric decider} 
 
 The timing behaviour of the full chain, of one SBPS stage, and of the \textit{rotate metric slice} unit is summarised in Figs.~\ref{fig:timing-SBPS-full}, \ref{fig:timing-SBPS-stage}, and \ref{fig:timing_rotate_metric_slice}, respectively. The control path uses single-cycle valid pulses rather than a ready/valid handshake, so temporal alignment is achieved entirely through fixed pipeline delays.
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.8\linewidth]{figures/SBPS_timing.png} 
-\caption{Timing diagram of the full SBPS algorithm}
-\label{fig:timing-SBPS-full}
-\end{figure}
 
 At the stage input, the two candidate phases are first generated while the input sample block is delayed in parallel so that both reach the branch datapaths in synchrony. The \textit{angle add} operation introduces three elapsed clock cycles, and the sample block is delayed by the same amount before it enters the \textit{rotate metric slice} unit.
 
@@ -619,10 +612,34 @@ Inside the \textit{rotate metric slice} unit, the rotator contributes three cycl
 
 After both branch metrics have become available, the \textit{min metric decider} requires one clock cycle to determine the winning branch, and the final stage output is registered one cycle later. Consequently, the phase-selection datapath of a stage spans eleven clock cycles, while the registered stage-valid output is asserted after twelve clock cycles. When latency is reported at the boundary of the complete SBPS chain rather than at a single stage boundary, one additional launch cycle must be included because the top-level chain registers the hand-off into the first stage.
 
-\subsection{16QAM-specific adaptations}
+\subsection{Radius-directed stages}
 
-For 16QAM, the slicer supports both conventional axis-based decisions and an optional radius-directed mode in the early refinement stages. In the conventional case, the decision on each axis is determined by the inner--outer threshold at \(\pm 2s\). In the radius-directed variant, an additional threshold \(l\) is introduced to identify samples that should be mapped directly to the outer ring of the constellation. This is beneficial in the first stages of the search, where the residual phase uncertainty is still relatively large and a purely axis-based decision can be less reliable. Once the phase estimate has been sufficiently refined, the later stages revert to the standard 16QAM slicer, so that the final metric evaluation follows the nominal decision regions.
-\todo{not well enough explained}
+The motivation for the radius-directed stages is the pattern effect described in Subsection~\ref{subsec:sbps-pattern-effect}. During the first \ac{SBPS} stages the candidate phases are still separated by relatively large angles. In this regime, middle-ring 16QAM symbols can produce misleading nearest-neighbour decisions and may create false minima in the accumulated branch metric. The hardware therefore supports a modified slicer mode for the first \(G_{\mathrm{RAD\_DIRECTED\_N}}\) stages of the chain.
+
+In the normal 16QAM slicer, each axis is decided independently using the threshold \(\pm 2s\):
+\begin{equation}
+D_{\mathrm{16QAM}}(I',Q')
+\in
+\{\pm s,\pm 3s\}
+\times
+\{\pm s,\pm 3s\}.
+\end{equation}
+This implements the usual nearest-neighbour decision regions. In the radius-directed mode, an additional comparator threshold \(l/2\) is evaluated on the absolute values of the rotated components. If either component lies outside this central box, the symbol is forced to the corresponding outer corner:
+\begin{equation}
+D_{\mathrm{RD}}(I',Q')
+=
+\begin{cases}
+\left(3s\,\mathrm{sgn}(I'),\,3s\,\mathrm{sgn}(Q')\right),
+& |I'| \geq l/2 \ \lor\ |Q'| \geq l/2,\\
+D_{\mathrm{16QAM}}(I',Q'),
+& \text{otherwise}.
+\end{cases}
+\label{eq:radius-directed-slicer}
+\end{equation}
+
+With \(l\) chosen such that the central box covers the inner constellation points but not the high-amplitude middle/outer points, this rule removes explicit middle-ring decisions from the coarse stages. The metric is then dominated by the inner and corner-like symbol classes, which have a more reliable angular relation to the carrier phase. This is cheaper than computing the Euclidean radius of every rotated sample, since the implementation only needs absolute-value operations and two comparisons per symbol.
+
+The generic \(G_{\mathrm{RAD\_DIRECTED\_N}}\) controls how many early stages use this slicer mode. For stage index \(k\), the generated chain sets the stage to radius-directed operation when \(k < G_{\mathrm{RAD\_DIRECTED\_N}}\). Once the phase estimate has been sufficiently refined, later stages revert to the conventional 16QAM slicer. This keeps the robustness benefit during coarse acquisition while preserving the final-stage resolution of the full 16QAM decision metric.
 
 % -------------------------------------------------------------
 % SPREAD ESTIMATION
@@ -708,7 +725,6 @@ candidate symbols from different regions of the block.
 \caption{Functional diagram of the SE input selector}
 \label{fig:SE_input_selector_functional}
 \end{figure}
-\todo{are signal big enough to be readable?}
 
 The input selector operates on the full block of received symbols $ \bar{r} $, and outputs three candidate symbols $x$, $y$, and $z$, 
 corresponding to the first, middle, and last regions of the block, respectively. These candidates are subsequently used for spread and
@@ -931,6 +947,13 @@ latency and format conversions of a CORDIC-based solution.
 
 This subsection describes the part of the spread-estimation backend that calculates the absolute 
 phase-spread estimate. The focus here is the computation from a pair of selected complex samples to the unsigned angle estimate \( |\theta| \).
+The top overview is given in the figure below:
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/SE_top.png}
+\caption{Top overview of the spread estimation module}
+\end{figure}
 
 \subsubsection{Functional operation}
 
@@ -939,10 +962,10 @@ After the selected samples have been raised to the fourth power, the spread-esti
     r_0^{(4)} = I_0^{(4)} + jQ_0^{(4)}, \qquad
     r_1^{(4)} = I_1^{(4)} + jQ_1^{(4)} .
 \]
-where $ I_x{(4)} $ and $ Q_x^{(4)} $ are the real and imaginary part respectively as also seen from equation~\ref{eq:re_and_im_fourth_power}.
+where $ I_x^{(4)} $ and $ Q_x^{(4)} $ are the real and imaginary part respectively as also seen from equation~\ref{eq:re_and_im_fourth_power}.
 The numerator of the cosine estimate is the dot product of these two fourth-power vectors:
 \[
-    N = I_0^{(4)} I_1^{(4)} + Q_0^{(4)} Q_1^{(4)} .
+    \left\langle r_0^{(4)}, r_1^{(4)} \right\rangle  = I_0^{(4)} I_1^{(4)} + Q_0^{(4)} Q_1^{(4)} .
 \]
 This dot product is proportional to
 \[
@@ -950,91 +973,419 @@ This dot product is proportional to
 \]
 so the required normalization factor is the reciprocal of the product of the two fourth-power vector magnitudes.
 
-For the 16-QAM constellation used here, the denominator is not computed with a run-time divider. Instead, each sample is classified as belonging to the inner or outer diagonal radius of the constellation. The two inner/outer flags address a small radius-product LUT. This LUT directly returns a precomputed reciprocal multiplication factor for the possible radius products:
+For the 16-QAM constellation used here, the denominator is not computed with a run-time divider. Instead, each sample is sliced as belonging to the inner or outer diagonal radius of the constellation. The two inner/outer flags address a small radius-product LUT. This \textit{radius\_prod\_LUT} directly returns a precomputed reciprocal multiplication factor for the possible radius products:
 \[
     R^{-1}_{\mathrm{II}}, \qquad
     R^{-1}_{\mathrm{IO}}, \qquad
     R^{-1}_{\mathrm{OO}} .
 \]
-The reciprocal factors are scaled fixed-point constants, so the normalization is implemented as one signed multiplication followed by an arithmetic right shift. The result is saturated to the interval representable by Q1.31 and represents
+The reciprocal factors are scaled fixed-point constants, so the normalization is implemented as one signed multiplication followed by an arithmetic right shift by the \textit{signed\_unit\_recip\_mult} block. The result is saturated to the interval representable by Q1.31 and represents
 \[
     x = \cos(4|\theta|).
 \]
-\todo{Add a small diagram showing the two parallel paths: fourth-power dot product and inner/outer reciprocal LUT, joining at the reciprocal multiplication.}
 
 The final conversion from \(x\) to an angle is performed by an arccosine LUT. Since the desired output is
 \[
     |\theta| = \frac{1}{4}\arccos(x),
 \]
-the LUT stores \(\arccos(x)/4\) rather than \(\arccos(x)\). Only the half-domain \(x \in [0,1]\) is stored. For negative inputs, the symmetry
+the LUT stores \(\arccos(x)/4\) rather than \(\arccos(x)\). Only the half-domain \(x \in [0,1]\) is stored, as marked in Figure~\ref{fig:LUT}. For negative inputs, the symmetry
 \[
     \frac{\arccos(-x)}{4}
     = \frac{\pi}{4} - \frac{\arccos(x)}{4}
 \]
 is used to reconstruct the correct value. The output of this stage is therefore the absolute phase-spread estimate \( |\theta| \), limited to the range \(0 \leq |\theta| \leq \pi/4\).
 
-\todo{Add a plot of the stored LUT function \(\arccos(x)/4\) for \(x \in [0,1]\), together with the symmetry reconstruction for \(x < 0\).}
-
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/LUT.png}
+\caption{\(\arccos(x)/4\) LUT symmetry}
+\label{fig:LUT}
+\end{figure}
 \subsubsection{Data flow}
 
-The spread-estimation calculation is implemented as a fixed-point pipeline. The selected input samples are signed \(G_{\mathrm{sample}}\)-bit values. In the current implementation this corresponds to 16-bit signed I/Q samples. The fourth-power stage produces signed real and imaginary components with width \(G_{\mathrm{pow4}}\). These components are kept at an extended precision because the subsequent dot product multiplies two fourth-power values.
+The spread-estimation calculation is implemented as a fixed-point pipeline. The selected input samples are signed \(G_{\mathrm{sample}}\)-bit values. In the implemented configuration, \(G_{\mathrm{sample}} = 16\), so these are 16-bit signed I/Q samples. The fourth-power stage produces signed real and imaginary components with width \(G_{\mathrm{pow4}}\). As discussed in the previous subsection, the implemented configuration uses \(G_{\mathrm{pow4}} = 70\). These components are kept at this extended precision because the subsequent dot product multiplies two fourth-power values.
 
-The dot-product output has width \(2G_{\mathrm{pow4}}+1\) and is signed, since the angle between the two fourth-power vectors can produce a negative cosine. In parallel, the delayed original I/Q samples are converted into inner/outer radius flags. The radius-product LUT outputs a signed 48-bit reciprocal factor. The constants are scaled such that multiplying the dot product by the LUT value and shifting right by \(G_{\mathrm{inv\_frac}}\) fractional bits produces a normalized Q1.31 value.
+The dot-product output has width \(2G_{\mathrm{pow4}}+1\) and is signed, since the angle between the two fourth-power vectors can produce a negative cosine. For the implemented default \(G_{\mathrm{pow4}} = 70\), this gives a 141-bit signed dot-product result. In parallel, the delayed original I/Q samples are converted into inner/outer radius flags. The radius-product LUT outputs a signed 48-bit reciprocal factor. The constants are scaled such that multiplying the dot product by the LUT value and shifting right by \(G_{\mathrm{inv\_frac}}\) fractional bits produces a normalized Q1.31 value. Unlike \(G_{\mathrm{sample}}\) and \(G_{\mathrm{pow4}}\), the value of \(G_{\mathrm{inv\_frac}}\) is tied to the chosen reciprocal-constant scaling and is therefore kept as a symbolic implementation parameter in this description.
 
-The normalized value is interpreted as a signed Q1.31 representation of \( \cos(4|\theta|) \). Before addressing the arccosine LUT, the absolute value is taken. The special case \(x=-1\) is saturated to the largest positive Q1.31 value before taking the absolute value, avoiding overflow in two's-complement representation. The LUT address is formed from the upper fractional bits of \(|x|\), specifically bits 30 down to 19, giving a 12-bit address and therefore 4096 table entries.
+The normalized value is interpreted as a signed Q1.31 representation of \( \cos(4|\theta|) \), which corresponds to a 32-bit signed fixed-point word. Before addressing the arccosine LUT, the absolute value is taken. The special case \(x=-1\) is saturated to the largest positive Q1.31 value before taking the absolute value, avoiding overflow in two's-complement representation. The LUT address is formed from the upper fractional bits of \(|x|\), specifically bits 30 down to 19, giving a 12-bit address and therefore 4096 table entries.
 
 The arccosine LUT output is also Q1.31. It stores \(\arccos(|x|)/4\) for non-negative input magnitudes. A delayed sign bit from the original Q1.31 cosine value selects either the direct LUT output or the reconstructed value \(\pi/4-\mathrm{LUT}(|x|)\). Thus the final output is a signed Q1.31 number, but it represents the non-negative angle \( |\theta| \).
-
-\todo{Add a fixed-point data-flow diagram with signal widths: input samples, fourth-power outputs, dot product, reciprocal LUT output, Q1.31 cosine, LUT address and Q1.31 angle.}
 
 \subsubsection{Timing flow}
 
 The block is fully pipelined. Once the pipeline is filled, a new valid sample pair can be accepted every clock cycle, provided both input-valid signals are asserted. The latency from the selected input pair to the \( |\theta| \) output is eight clock cycles in the current implementation.
 
+Because the architecture contains two parallel branches, a single cumulative-latency column can be misleading. Table~\ref{tab:spread-estimation-latency} therefore reports the cumulative latency separately for each path up to the alignment point. After both branches have been aligned, the remaining stages are shown as a common path. In the table, ``Cum.'' is path-local before the merge and is measured from the original input pair after the merge.
+
 \begin{table}[h]
     \centering
     \caption{Pipeline latency of the absolute spread-estimation calculation.}
     \label{tab:spread-estimation-latency}
-    \begin{tabular}{lcc}
+    \small
+    \begin{tabular}{p{0.22\linewidth} p{0.40\linewidth} c c}
         \hline
-        Block & Incremental latency & Cumulative latency \\
+        Path & Block & $+\,$clk & Cum. \\
         \hline
-        Fourth-power pipeline & 4 clk & 4 clk \\
-        Dot product & 1 clk & 5 clk \\
-        I/Q delay for denominator path & 3 clk & 3 clk \\
-        Inner/outer flag generation & 1 clk & 4 clk \\
-        Radius-product reciprocal LUT & 1 clk & 5 clk \\
-        Reciprocal multiplication and saturation & 1 clk & 6 clk \\
-        Arccos LUT address, BRAM read and sign alignment & 2 clk & 8 clk \\
+        Dot-product path & Fourth-power pipeline & 4 clk & 4 clk \\
+        Dot-product path & Dot product & 1 clk & 5 clk \\
+        Denominator path & I/Q delay for denominator path & 3 clk & 3 clk \\
+        Denominator path & Inner/outer flag generation & 1 clk & 4 clk \\
+        Denominator path & Radius-product reciprocal LUT & 1 clk & 5 clk \\
+        Common after merge & Reciprocal multiplication and saturation & 1 clk & 6 clk \\
+        Common after merge & Arccos LUT address, BRAM read and sign alignment & 2 clk & 8 clk \\
         \hline
     \end{tabular}
 \end{table}
 
-The fourth-power dot-product path and the denominator-reciprocal path are explicitly balanced. The denominator path starts with a three-clock delay of the original I/Q samples so that its reciprocal factor becomes valid in the same clock cycle as the dot product. The reciprocal multiplication stage only asserts its output-valid signal when both the dot product and the reciprocal factor are valid. The arccosine stage then adds two clocks, matching the LUT read latency and the delayed sign/valid signals used for half-domain reconstruction.
-
-\todo{Add a timing diagram showing valid propagation through the dot-product path, reciprocal-denominator path, reciprocal multiplier and arccos LUT.}
+The fourth-power dot-product path and the denominator-reciprocal path are explicitly balanced. The denominator path starts with a three-clock delay of the original I/Q samples so that its reciprocal factor becomes valid in the same clock cycle as the dot product. Both branches therefore align after five clock cycles. The reciprocal multiplication stage only asserts its output-valid signal when both the dot product and the reciprocal factor are valid. The arccosine stage then adds two clocks, matching the LUT read latency and the delayed sign/valid signals used for half-domain reconstruction.
 
 \subsection{Sign estimation}
+\label{subsec:sign-estimation}
+
+The absolute spread-estimation path determines the magnitude \( |\theta| \). A separate sign-estimation path determines whether this magnitude must be applied as a positive or negative phase estimate. This subsection describes the blocks that generate this final sign decision and align it with the absolute-angle output.
+An overview of this topology can be seen in Figure~\ref{fig:Sign-top}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/sign_top.png}
+\caption{Top overview of the sign estimation module}
+\label{fig:Sign-top}
+\end{figure}
+
 \subsubsection{Functional operation}
-sign pair decider go to  first + middle or middle + last combination 
-with that combo complex cross sign 
+
+The sign estimator uses the orientation of two fourth-power complex vectors. For two selected fourth-power samples
+\[
+    r_0^{(4)} = I_0^{(4)} + jQ_0^{(4)}, \qquad
+    r_1^{(4)} = I_1^{(4)} + jQ_1^{(4)},
+\]
+the sign is determined from the two-dimensional cross product
+\[
+    r_0^{(4)} \times r_1^{(4)} = I_0^{(4)}Q_1^{(4)} - Q_0^{(4)}I_1^{(4)} .
+\]
+This quantity is proportional to
+\[
+    |r_0^{(4)}|\,|r_1^{(4)}|\sin(\phi_1-\phi_0),
+\]
+so its sign gives the rotation direction between the two fourth-power vectors. A positive cross product corresponds to one rotation direction, while a negative cross product corresponds to the opposite direction. Only the sign of $ r_0^{(4)} \times r_1^{(4)}$ is needed; the magnitude of the cross product is discarded.
+
+The sign path receives three candidate symbols: first, middle and last. The sign-pair decision block selects which adjacent pair should be used for the sign estimate. If the first and middle candidates are both marked as updated, the sign is calculated from the first--middle pair. Otherwise, if the middle and last candidates are both marked as updated, the sign is calculated from the middle--last pair. If neither update combination is present, the previously selected pair is held.
+
+Once the pair has been selected, the cross-product sign block computes the two products \(I_0^{(4)}Q_1^{(4)}\) and \(Q_0^{(4)}I_1^{(4)}\), subtracts them, and encodes the sign as a two-bit value. In the final sign-application block, the code \texttt{"11"} is interpreted as a positive sign and \texttt{"01"} as a negative sign. The signed angle is then generated as
+\[
+    \theta =
+    \begin{cases}
+        -|\theta|, & \text{if the sign code is \texttt{"01"},}\\
+        \phantom{-}|\theta|, & \text{otherwise.}
+    \end{cases}
+\]
+
+When the optional sign filter is enabled, the raw sign decisions are passed through a rolling majority filter. This filter stores the last \(2^{G_{\mathrm{log2\_signwin}}}\) sign decisions and outputs the majority sign. In case of an exact tie, the previous output sign is retained. This avoids rapid sign toggling when consecutive estimates are close to the decision boundary.
 
 \subsubsection{Data flow}
+
+The sign estimator operates on the same fourth-power representation used by the absolute-angle calculation. The first and last fourth-power values are exposed by the absolute spread-estimation backend, while the middle symbol is passed through an additional fourth-power block. Each fourth-power vector consists of signed real and imaginary components with width \(G_{\mathrm{pow4}}\). In the implemented configuration, \(G_{\mathrm{pow4}} = 70\), so both the real and imaginary fourth-power components are 70-bit signed values.
+
+The update and hold control signals from the candidate-selection logic are Boolean control signals. Since the fourth-power pipeline has a latency of four clock cycles, these control signals are delayed by the same amount before they are used by the sign-pair decision block. This ensures that the delayed update decisions refer to the fourth-power samples currently present at the sign-pair selector inputs.
+
+The selected sign pair consists of two signed complex vectors:
+\[
+    (I_0^{(4)}, Q_0^{(4)}) \quad \text{and} \quad
+    (I_1^{(4)}, Q_1^{(4)}).
+\]
+The cross-product block multiplies two \(G_{\mathrm{pow4}}\)-bit signed values, producing two signed products of width \(2G_{\mathrm{pow4}}\). With \(G_{\mathrm{pow4}} = 70\), each product is therefore 140 bits wide. The subtraction is performed with one additional bit, giving a signed difference width of \(2G_{\mathrm{pow4}}+1\). In the implemented configuration this corresponds to a 141-bit signed difference. Only the sign of this difference is encoded at the output.
+
+The raw sign output is a two-bit code. The final theta-signing block interprets \texttt{"01"} as a negative sign and negates the Q1.31 absolute-angle value in that case. All other sign codes produce a positive output. The resulting signed angle remains in the same fixed-point format as the absolute-angle input.
+
 \subsubsection{Timing flow}
+
+The sign path is timed to match the absolute-angle pipeline. The fourth-power outputs are available after four clock cycles. The update and hold control signals are therefore delayed by four clock cycles before pair selection. The pair selector registers the selected pair, the cross-product sign block uses two pipeline stages, and the sign output is delayed by one additional clock. This gives an eight-clock latency from the candidate-symbol inputs to the raw sign output, matching the eight-clock latency of the \( |\theta| \) path.
+
+Here too, two branches exist before alignment: the fourth-power data path and the delayed update/hold control path. Table~\ref{tab:sign-estimation-latency} therefore shows separate cumulative latencies up to the pair-selection stage, followed by the common post-alignment stages. As above, ``Cum.'' is path-local before the merge and is measured from the original input pair after the merge.
+
+\begin{table}[h]
+    \centering
+    \caption{Pipeline latency of the sign-estimation calculation.}
+    \label{tab:sign-estimation-latency}
+    \small
+    \begin{tabular}{p{0.22\linewidth} p{0.40\linewidth} c c}
+        \hline
+        Path & Block & $+\,$clk & Cum. \\
+        \hline
+        Data path & Fourth-power pipeline & 4 clk & 4 clk \\
+        Control path & Hold/update control delay & 4 clk & 4 clk \\
+        Common after merge & Sign-pair selection register & 1 clk & 5 clk \\
+        Common after merge & Cross-product products & 1 clk & 6 clk \\
+        Common after merge & Cross-product subtraction and sign encoding & 1 clk & 7 clk \\
+        Common after merge & Sign alignment delay & 1 clk & 8 clk \\
+        \hline
+    \end{tabular}
+\end{table}
+
+The sign-estimation backend contains an assertion that checks whether the raw sign-valid signal and the absolute-angle valid signal are aligned. The data path and control path are aligned after four clock cycles, after which the remaining four stages are shared. After optional filtering, the sign majority filter produces one output for each valid input sign. The final sign-application block then waits until both the absolute-angle valid signal and the sign-valid signal are asserted in the same clock cycle before producing the signed \(\theta\) output.
 
 \subsection{Filters}
-% \subsubsection{Functional operation}
-% \subsubsection{Data flow}
-\subsubsection{Timing flow}
+\label{subsec:spread-estimation-filters}
+
+Two optional filters are placed after the raw spread-estimation backend. The first filter smooths the absolute angle estimate, while the second filter smooths the sign decision. They are implemented separately because the two signals have different data types: the angle magnitude is a fixed-point numerical value, whereas the sign is a two-bit decision.
+
+\subsubsection{Magnitude moving-average filter}
+
+The magnitude filter is a rolling moving average over the Q-format angle estimate. Its window length is constrained to a power of two:
+\[
+    N_{\mathrm{avg}} = 2^{G_{\mathrm{log2\_avg}}}.
+\]
+This makes the final division by the window length a right shift instead of a general divider to reduce computational complexity. The filter stores the last \(N_{\mathrm{avg}}\) input samples in a circular buffer and maintains a running sum. For every new valid input sample \(x[n]\), the oldest sample in the buffer is subtracted and the new sample is added:
+\[
+    S[n] = S[n-1] + x[n] - x[n-N_{\mathrm{avg}}].
+\]
+The filtered output is then
+\[
+    y[n] = \frac{S[n]}{N_{\mathrm{avg}}},
+\]
+implemented as an arithmetic right shift by \(G_{\mathrm{log2\_avg}}\) bits.
+
+The accumulator width is increased by \(G_{\mathrm{log2\_avg}}\) bits compared to the input width. This provides enough range to hold the sum of \(N_{\mathrm{avg}}\) signed input samples without overflow under normal fixed-point assumptions. If \(G_{\mathrm{log2\_avg}}=0\), the window length is one and the filter becomes a direct pass-through.
+
+At start-up, the first valid sample is replicated across the entire logical window. This means the first filtered output is equal to the first input sample, instead of requiring a long fill period before a valid average can be produced. After this initialization, every valid input produces one valid filtered output.
+
+\subsubsection{Sign rolling-majority filter}
+
+The sign filter performs a rolling majority vote over the raw sign decisions, a graphical overview of its functional principles are given in Figure~\ref{fig:circular-buffer}. Its window length is also a power of two:
+\[
+    N_{\mathrm{sign}} = 2^{G_{\mathrm{log2\_signwin}}}.
+\]
+The incoming sign is encoded as a two-bit value, where \texttt{"11"} represents a positive sign and \texttt{"01"} represents a negative sign. Internally, the filter stores only one bit per sign decision: positive signs are stored as 1 and negative signs as 0.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/circular_buffer.png}
+\caption{Sign rolling-majority filter with circular buffer}
+\label{fig:circular-buffer}
+\end{figure}
+
+As with the moving-average filter, the sign filter uses a circular buffer. Instead of storing a numerical sum of signed values, it keeps a count of the number of positive signs currently present in the window. For every valid input sign, the oldest stored bit is removed from the count and the new sign bit is added. The output is then decided by comparing the positive count with half the window length:
+\[
+    \mathrm{sign}_{\mathrm{out}} =
+    \begin{cases}
+        +, & \text{if } N_+ > N_{\mathrm{sign}}/2,\\
+        -, & \text{if } N_+ < N_{\mathrm{sign}}/2,\\
+        \text{previous sign}, & \text{if } N_+ = N_{\mathrm{sign}}/2.
+    \end{cases}
+\]
+The tie case is handled by holding the previous output sign. This prevents the filtered sign from toggling when the window contains an equal number of positive and negative decisions.
+
+At reset, the sign-memory contents and output are initialized to the positive sign. On the first valid input, the whole logical window is initialized with that first sign, so the first output follows the first real sign decision. If \(G_{\mathrm{log2\_signwin}}=0\), the window length is one and the filter becomes a direct sign pass-through.
 
 
 
+\subsubsection{Timing and alignment}
+
+Both filters are streaming filters: after initialization, each valid input produces one valid output. The moving-average filter and the sign-majority filter each register their output, so they add one clock cycle of processing latency relative to their valid input. Because both filtered paths are driven from already aligned raw backend outputs, using the same valid-driven structure keeps the filtered magnitude and filtered sign aligned for the final signed-\(\theta\) generation.
+
+\subsection{Magnitude and Sign integration}
+\label{subsec:spread-estimation-magnitude-sign-integration}
+
+After filtering, the angle estimate is reconstructed by combining the filtered magnitude with the filtered sign decision. The magnitude filter provides the absolute value \(\lvert \theta_{\mathrm{filt}} \rvert\), while the sign filter determines whether this magnitude should be interpreted as a positive or negative angle. The final signed estimate is therefore formed as
+\[
+    \theta_{\mathrm{out}} =
+    \begin{cases}
+        \phantom{-}\lvert \theta_{\mathrm{filt}} \rvert, & \text{if } \mathrm{sign}_{\mathrm{filt}} = +,\\
+        -\lvert \theta_{\mathrm{filt}} \rvert, & \text{if } \mathrm{sign}_{\mathrm{filt}} = -.
+    \end{cases}
+\]
+
+At last, the output valid signal is asserted only when both filtered components are valid, producing one aligned signed-\(\theta\) value for each accepted raw estimate.
+
+\section{Phase unwrapper}
+\label{sec:hardware-phase-unwrapper}
+
+The phase unwrapper receives the wrapped centre-phase estimate from the \ac{SBPS} chain and the signed phase-spread estimate from the \ac{SE} block. In the implemented system this logic is part of the \textit{PUPC} block, but it is described separately here because it forms the stateful boundary between the blockwise estimator and the final phase compensator.
+The top overview of the implementated hardware with annotated timing is illustrated below.
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/PU_top.png}
+\caption{Top overview of phase unwrapper block}
+\label{fig:PU-top}
+\end{figure}
 
 
+\subsection{Functional operation}
 
+The RTL hierarchy is split into two modules. The \textit{phase\_unwrapper\_top} module first reconstructs the leading and lagging edge phases of the current block, while the \textit{phase\_unwrapper} module performs the actual branch tracking. The edge reconstruction is implemented by the \textit{lead\_lag\_calculator}:
+\begin{align}
+    \phi_{\mathrm{lead}} &= \phi_e + \frac{\theta}{2},\\
+    \phi_{\mathrm{lag}}  &= \phi_e - \frac{\theta}{2}.
+\end{align}
+Here, \(\phi_e\) is the wrapped centre phase in Q4.28 and \(\theta\) is the signed spread estimate in the same format. The division by two is implemented as an arithmetic right shift, so the Q-format is preserved.
 
-\section{Phase correction block}
-\section{Top-level integration}
+For every valid block after the first one, the unwrapper compares the current lagging edge with the stored leading edge of the previous block:
+\begin{equation}
+    d_b = \phi_{\mathrm{lag},b} - \phi_{\mathrm{lead},b-1}.
+\end{equation}
+If this difference crosses the \(\pm \pi/4\) decision threshold, the two-bit unwrap counter is updated by one quadrant. A difference larger than or equal to \(+\pi/4\) decrements the counter, while a difference below \(-\pi/4\) increments it. The counter is stored modulo four, because the final constellation is unchanged by an additional \(2\pi\) rotation. The counter value selects one of four Q4.28 offsets:
+\[
+    0,\quad \frac{\pi}{2},\quad \pi,\quad \frac{3\pi}{2}.
+\]
+This offset is added to the delayed centre phase to produce the unwrapped centre phase. The first valid block is passed through without a correction, because no previous leading edge is available yet. The current leading edge is then stored for the next block.
 
+\subsection{Data flow}
+
+All phase quantities inside the unwrapper are signed 32-bit Q4.28 words. The constants \(\pi/4\), \(\pi/2\), \(\pi\), and \(3\pi/2\) are stored directly in the same representation. The branch state itself is only a two-bit unsigned value, exposed at the PUPC boundary as \textit{dbg\_pu\_idx} for simulation and debugging.
+
+The \textit{phase\_unwrapper\_top} module delays the centre phase by one clock cycle so that it is aligned with the lead and lag outputs of the \textit{lead\_lag\_calculator}. The unwrapping decision therefore receives three aligned values: the current leading edge, the current lagging edge and the current centre phase. The output remains a Q4.28 centre-phase word, so no conversion is required before the section-coefficient generator.
+
+\subsection{Timing flow}
+
+The lead/lag calculation is registered and contributes one clock cycle. The centre phase is delayed by the same amount inside \textit{phase\_unwrapper\_top}. The \textit{phase\_unwrapper} then performs the edge-difference comparison, counter update, offset selection and output registration in the following cycle. The unwrapped phase is therefore available two clock cycles after a valid wrapped phase and spread estimate enter \textit{phase\_unwrapper\_top}.
+
+The surrounding \textit{phase\_unwrap\_comp\_top} module delays \(\theta\) by the same two clock cycles before passing it to the section-phase generator. This keeps the spread estimate aligned with the unwrapped centre phase used for the final compensation coefficients.
+
+\section{Phase compensation block}
+\label{sec:hardware-phase-compensation}
+
+The phase compensation block forms the final stage of the carrier-recovery datapath. It combines the unwrapped centre phase, the signed spread estimate and the delayed received symbol block to generate one CORDIC rotation phase per symbol. In the RTL this functionality is implemented by the \textit{PUPC} hierarchy. The top-level \textit{PUPC} module (see Figure~\ref{fig:PC-top}) first converts and aligns the incoming signals, after which the \textit{phase\_correction\_rotate\_top} module generates the per-symbol phases and rotates the complete block.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/PC_top.png}
+\caption{Top overview of phase compensation block}
+\label{fig:PC-top}
+\end{figure}
+
+\subsection{Functional operation}
+
+The \ac{SBPS} chain represents its selected centre phase as Q1.15 cosine and sine values. Since the phase unwrapper and compensation logic operate on explicit phase words, the \textit{PUPC} top level converts these two trigonometric components to a signed Q4.28 angle using the \textit{trig\_2\_rad} module, as seen in Figure~\ref{fig:PU-top}. The signed spread estimate \(\theta\) already arrives as Q4.28 and is therefore only delayed to match the \textit{trig\_2\_rad} latency. The input I/Q block is delayed by the same amount so that samples, centre phase and spread estimate enter the correction stage in the same clock cycle.
+
+After phase unwrapping, the \textit{phase\_compensation\_coeffs} module generates one representative phase per compensation section. The section coefficients are computed at elaboration time from
+\begin{equation}
+    c_n =
+    \frac{2n+1-N_{\mathrm{sec}}}{2N_{\mathrm{sec}}},
+    \qquad n=0,\ldots,N_{\mathrm{sec}}-1,
+\end{equation}
+and stored as signed fixed-point constants with \(G_{\mathrm{COEFF\_FRAC}}\) fractional bits. For each valid block, every section phase is then computed as
+\begin{equation}\label{eq:comp_sections}
+    \phi_n = \tilde{\phi}_e + c_n \theta .
+\end{equation}
+The multiplication \(c_n\theta\) is followed by an arithmetic right shift by \(G_{\mathrm{COEFF\_FRAC}}\) bits, returning the result to the Q4.28 phase format before it is added to the unwrapped centre phase.
+
+The generated section phases are converted to the CORDIC phase format and expanded to per-symbol phases. The \textit{section\_phase\_expander} assumes that \(G_{\mathrm{NUM\_SYM}}\) is evenly divisible by \(G_{\mathrm{NSEC}}\), so each section contains
+\[
+    G_{\mathrm{SYM\_PER\_SEC}} =
+    \frac{G_{\mathrm{NUM\_SYM}}}{G_{\mathrm{NSEC}}}
+\]
+symbols. For symbol index \(k\), the applied phase is selected from section \(k/G_{\mathrm{SYM\_PER\_SEC}}\). The resulting per-symbol phases drive a parallel \textit{cordic\_rotate\_bank}, which instantiates one Xilinx CORDIC rotator per symbol.
+
+\subsection{Data flow}
+
+The PUPC datapath uses three phase representations. The \ac{SBPS} output enters as Q1.15 sine and cosine. The internal unwrapping and section-generation path uses signed Q4.28 phase words. Finally, the phases passed to the CORDIC IP are converted to Q3.13. During this conversion, the Q4.28 section phase is first wrapped into the interval \([-\pi,\pi]\), then rounded by adding or subtracting \(2^{14}\), and finally shifted right by 15 bits.
+
+The I/Q samples enter the block as separate packed Q1.15 buses. Before the CORDIC bank, the \textit{input\_reformatter} converts every symbol to the CORDIC Cartesian format by shifting Q1.15 to Q2.14. The per-symbol Cartesian word is packed as \(\{X,Y\}\). After rotation, the CORDIC outputs are interpreted as Q2.14 and shifted left by one bit to return to Q1.15. The output block is again presented as separate packed I and Q buses.
+
+The implemented Vivado IP instance is parameterized with \(G_{\mathrm{NUM\_SYM}}=32\), \(G_{\mathrm{NSEC}}=16\), \(G_{\mathrm{SAMPLE\_WIDTH}}=16\), \(G_{\mathrm{PHASE\_WIDTH}}=32\), \(G_{\mathrm{COEFF\_WIDTH}}=16\), \(G_{\mathrm{COEFF\_FRAC}}=14\), \(G_{\mathrm{PHASE\_OUT\_WIDTH}}=16\), and \(G_{\mathrm{DELAY}}=18\). These generics keep the block-size, section count and fixed-point formats explicit, while allowing the same hierarchy to be regenerated for other sweep configurations.
+
+\subsection{Timing flow}
+
+At the PUPC top level, the atan2 conversion defines the initial alignment point. The RTL uses an 18-cycle delay for both the Q4.28 spread estimate and the packed I/Q symbol block, matching the atan2 output latency. The valid signal into the phase-correction backend is asserted only when the atan2 output, delayed theta and delayed symbol block are all valid.
+
+Inside \textit{phase\_correction\_input\_top}, the phase unwrapping and section-phase generation require three clock cycles: two cycles for \textit{phase\_unwrapper\_top} and one cycle for \textit{phase\_compensation\_coeffs}. The I/Q block is delayed by three cycles in parallel. The \textit{input\_reformatter} then adds one registered conversion cycle, and the \textit{section\_phase\_expander} adds one further cycle. The Cartesian path is delayed by one cycle after reformatting so that it remains aligned with the expanded phase vector.
+
+\begin{table}[H]
+    \centering
+    \caption{Pipeline latency before the CORDIC rotation bank in the PUPC backend.}
+    \label{tab:pupc-precordic-latency}
+    \small
+    \begin{tabular}{p{0.46\linewidth} c c}
+        \hline
+        Stage & $+\,$clk & Cum. after PUPC alignment \\
+        \hline
+        Phase unwrapping & 2 clk & 2 clk \\
+        Section-phase coefficient generation & 1 clk & 3 clk \\
+        I/Q and phase reformatting & 1 clk & 4 clk \\
+        Section-to-symbol phase expansion and Cartesian alignment & 1 clk & 5 clk \\
+        \hline
+    \end{tabular}
+\end{table}
+
+After this point, the latency is determined by the configured Xilinx CORDIC IP. All CORDIC instances in the bank receive the same valid pulse and use the same configuration, so the bank output-valid signal is taken from the first CORDIC output valid. The rotated samples are registered when the CORDIC output becomes valid and are then exposed at the PUPC output as the corrected block.
+
+\section{Top-design overview}
+
+The previous sections described the main processing blocks individually. The top design combines these blocks into a single blockwise carrier-recovery datapath. Its purpose is not to introduce a new estimation algorithm, but to connect the already discussed \ac{SBPS}, \ac{SE}, phase unwrapping and phase-compensation blocks while preserving the correct timing relation between their outputs.
+
+The implemented wrapper is built around one received block interface. The in-phase and quadrature samples enter as two packed buses, each containing \(G_{\mathrm{NUM\_SYM}}=32\) signed Q1.15 samples. From this common input, the datapath splits into three parallel branches:
+
+\begin{enumerate}
+    \item the \ac{SBPS} chain estimates the wrapped centre phase of the block,
+    \item the \ac{SE} block estimates the signed phase spread over the block,
+    \item an explicit I/Q delay line preserves the original input block until the phase estimates are available.
+\end{enumerate}
+
+This structure is important because the spread estimator in the implemented top design operates on the original received block, not on a block that has already been derotated by the \ac{SBPS} result. The \ac{SBPS} and \ac{SE} branches therefore both observe the same noisy, phase-impaired input block. Their outputs describe complementary aspects of that same block: \(\phi_e\) is the wrapped centre-phase estimate, while \(\theta\) is the signed phase-spread estimate.
+An overview is given in the following figure:
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/top.png}
+\caption{Top overview implemented algorithm}
+\end{figure}
+
+\subsection{Functional dataflow}
+
+At the top-design boundary, \texttt{in\_valid} is distributed to both the \ac{SBPS} chain and the \ac{SE} block. The \ac{SBPS} chain processes the full block through its serial refinement stages and outputs the selected phase estimate as trigonometric coefficients. Internally these coefficients leave the \ac{SBPS} IP as Q1.31 cosine and sine values. Before they enter the \textit{PUPC} block, the \textit{trigQ31\_to\_Q15} adapter truncates them to Q1.15 by dropping the lower fractional bits (Figure~\ref{fig:dataflow-top}). This adapter is purely combinational, so it does not alter the valid timing of the \ac{SBPS} output.
+
+In parallel, the \ac{SE} block outputs the signed spread estimate \(\theta\) directly as a 32-bit Q4.28 phase word. This representation matches the downstream phase-unwrapping and phase-compensation logic, so no numerical format conversion is needed at the top-design boundary. Only a timing-alignment delay is inserted before \(\theta\) is passed to \textit{PUPC}.
+
+The third branch contains the raw I/Q block delay. This branch carries the original Q1.15 samples, still packed as separate I and Q buses. The delayed block is the block that \textit{PUPC} finally rotates. Consequently, the final compensation stage applies the centre phase and phase-spread information to the same sample block from which these estimates were derived.
+
+\begin{table}[H]
+    \centering
+    \caption{Main data streams at the top-design boundary.}
+    \label{tab:top-design-streams}
+    \small
+    \begin{tabular}{p{0.24\linewidth} p{0.26\linewidth} p{0.35\linewidth}}
+        \hline
+        Stream & Representation & Top-design role \\
+        \hline
+        \(I/Q\) input block & \(32 \times 16\)-bit Q1.15, packed per component & Common input to \ac{SBPS}, \ac{SE} and the sample-delay branch \\
+        \ac{SBPS} phase & Q1.31 \(\cos(\phi_e)\), \(\sin(\phi_e)\), truncated to Q1.15 & Wrapped centre-phase estimate for \textit{PUPC} \\
+        \ac{SE} spread & Signed 32-bit Q4.28 phase word & Signed spread estimate \(\theta\), delayed to match the \ac{SBPS} branch \\
+        Delayed \(I/Q\) block & \(32 \times 16\)-bit Q1.15, packed per component & Original sample block supplied to the final rotation stage \\
+        Corrected \(I/Q\) block & \(32 \times 16\)-bit Q1.15, packed per component & Output of the \textit{PUPC} correction path \\
+        \hline
+    \end{tabular}
+\end{table}
+
+After these top-level alignment operations, \textit{PUPC} performs the remaining phase-domain processing. First, the Q1.15 trigonometric \ac{SBPS} result is converted to a Q4.28 phase word using the atan2 path described in the phase-compensation section. The delayed \(\theta\) value and delayed I/Q block are aligned to this conversion latency inside \textit{PUPC}. The phase unwrapper then combines the wrapped centre phase and signed spread estimate to maintain the correct \(\pi/2\) branch across successive blocks. Finally, the compensation-coefficient generator expands the block-level phase description into section phases and then to per-symbol \ac{CORDIC} rotation phases.
+
+\subsection{Timing and alignment}
+
+The top design uses fixed-latency valid pulses rather than a back-pressure handshake. The \texttt{in\_valid} pulse launches the \ac{SBPS} and \ac{SE} branches at the same clock edge, and every following alignment decision is expressed as a deterministic delay. This is why the wrapper contains two explicit alignment blocks in addition to the algorithmic modules.
+
+The first alignment block is the \textit{synchroniser}. It delays the signed Q4.28 spread estimate until it is temporally aligned with the \ac{SBPS} centre-phase estimate. Its delay is parameterised as
+
+\begin{equation}
+    D_{\mathrm{sync}}
+    =
+    G_{\mathrm{SBPS\_STAGES}}G_{\mathrm{SBPS\_STAGEDELAY}}
+    -
+    G_{\mathrm{SE\_DELAY}} .
+\end{equation}
+
+The assertion inside this block checks that the configured \ac{SBPS} latency model is not shorter than the configured \ac{SE} latency. If both branches are already aligned, the block becomes a pass-through; otherwise, both the valid pulse and \(\theta\) data word are shifted through the same delay line. In the generated block design, the \ac{SBPS} valid pulse is used as the master valid into \textit{PUPC}, while the synchronised \(\theta\) data is routed to the \textit{PUPC} theta input. This makes the top-level timing contract explicit: \(\theta\) must be delayed until it is valid on the same cycle as the \ac{SBPS} output coefficients.
+
+The second alignment block is the \textit{iq\_block\_delay}. It delays the full packed I/Q block by the same configured \ac{SBPS} latency model:
+
+\begin{equation}
+    D_{\mathrm{IQ}}
+    =
+    G_{\mathrm{SBPS\_STAGES}}G_{\mathrm{SBPS\_STAGEDELAY}} .
+\end{equation}
+
+This delay is needed because the samples themselves do not pass through the \ac{SBPS} or \ac{SE} estimation pipelines before correction. Without the delay, \textit{PUPC} would receive a phase estimate belonging to an older block while rotating the newest input block. By delaying the raw block at the top level, the final rotation stage receives three mutually aligned quantities: the wrapped centre-phase estimate, the signed spread estimate and the corresponding received samples.
+
+There is one additional alignment boundary inside \textit{PUPC}. The \ac{SBPS} phase enters \textit{PUPC} as Q1.15 sine and cosine, whereas the unwrapper and compensation logic operate on Q4.28 phase words. The atan2 conversion therefore defines a local timing point inside \textit{PUPC}; the spread estimate and the I/Q block are delayed by the same conversion latency before entering the phase-unwrapping and section-generation backend. This second alignment step is local to the compensation block, while the \textit{synchroniser} and \textit{iq\_block\_delay} solve the inter-block timing at the top-design level.
+
+Functionally, the top design can therefore be viewed as a three-input merge into \textit{PUPC}: a wrapped centre phase from \ac{SBPS}, a signed phase spread from \ac{SE}, and the delayed original sample block. The additional wrapper blocks do not change the phase-recovery algorithm itself; they ensure that the different numerical representations and pipeline latencies meet at the same block boundary.
 
 

@@ -1,21 +1,148 @@
-\chapter{Verification and simulation}\label{Verification and simulation}
-You already have:
-python
-vectors
-testbenches
-error plots
-Put all here.
+\chapter{Verification and simulation model}\label{Verification and simulation}
 
-\section{Simulation model}
+\section{Overview}
+
+The verification flow is built around a Python golden model and a set of vector-driven \ac{VHDL} testbenches. The purpose of this flow is not only to check whether the final architecture produces corrected \ac{16QAM} symbols, but also to isolate errors in the individual processing blocks before they are integrated into the complete phase recovery chain.
+
+The general simulation flow is shown conceptually in Figure~\ref{fig:verification-pipeline} with:
+
+\begin{enumerate}
+    \item Python generates deterministic input vectors and the corresponding reference data.
+    \item The generated vectors are quantized to the fixed-point formats used by the RTL.
+    \item A \ac{VHDL} testbench reads the vectors from text files and applies them to the \ac{DUT}.
+    \item The testbench either checks the result internally or writes an output vector file.
+    \item Python post-processing scripts compare the RTL output with the golden model or clean reference symbols.
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/verification_pipeline.png}
+\caption{Verification pipeline}
+\label{fig:verification-pipeline}
+\end{figure}
+
+This separation between vector generation, RTL simulation and output analysis makes the verification reproducible. Each input file fixes the random seeds, channel impairments and block size used for a test case. The same vector can therefore be rerun after changes to the RTL, and the resulting output can be compared with the same Python reference.
+
+Two verification levels are used:
+\begin{itemize}
+    \item block-level verification, where individual datapath modules are checked against simple analytical or Python-generated references,
+    \item and system-level verification, where the complete phase-recovery wrapper is simulated using impaired \ac{16QAM} symbol streams.
+\end{itemize}
+
+The block-level tests are mainly used to verify arithmetic behaviour, fixed-point scaling, valid-signal alignment and corner cases. The system-level tests are used to verify that all blocks remain correctly aligned after integration and that the recovered output stream can be decoded against the transmitted bit sequence. The quantitative results of these simulations are discussed in Chapter~\ref{Results}; this chapter describes the simulation model and verification procedure.
+
 \section{Test vector generation}
-\section{VHDL testbench setup}
-\section{Error analysis}
-\subsection{Serialized blind phase search}
-\subsection{Phase spread estimation}
-The absolute phase error between the floating-point model and the fixed-point implementation remains below ... rad for all tested blocks.
-\subsection{Phase unwrapper}
-\subsection{Phase compensator}
 
+The Python side of the verification environment is contained in the \texttt{phase\_recovery} folder. The scripts are grouped by purpose into generation, analysis, plotting and utility modules. The generation scripts create deterministic input files for the RTL testbenches, while the analysis scripts interpret the output files produced by simulation.
+
+\subsection{Golden model structure}
+
+The Python golden model follows the same block structure as the RTL implementation. The most important algorithmic modules are:
+\begin{itemize}
+    \item \texttt{bps\_serialised.py}, which models the serialized binary phase search,
+    \item \texttt{spread\_16qam.py}, which models the spread-estimation calculation,
+    \item \texttt{phase\_unwrap.py}, which models the edge-continuity phase unwrapper,
+    \item and \texttt{compensate.py}, which models section-based phase compensation.
+\end{itemize}
+
+These modules operate in floating point and are used to generate expected behaviour before the RTL fixed-point effects are introduced. For vector generation, the floating-point values are quantized to the fixed-point formats used by the hardware. This makes the generated reference vectors suitable for direct comparison with the RTL datapaths.
+
+\subsection{Block-level vectors}
+
+Separate vector generators are used for the major processing blocks. For example, the \ac{SBPS} stage vectors contain the input symbol block, the previous phase estimate, the stage test angle and the expected selected output phase. The phase-unwrapper vectors contain Q4.28 centre-phase and spread estimates together with the expected unwrapped phase. The spread-estimation vectors contain selected symbols and reference values for fourth-power, dot-product, arccosine and sign-related subblocks.
+
+The generated files are text based. Comment lines start with \texttt{\#}, and data lines contain integer fixed-point values. This keeps the interface simple for \ac{VHDL} \texttt{textio} testbenches and makes the files easy to inspect manually. A typical block-based input line has the form:
+
+\begin{center}
+\texttt{block\_id I0 Q0 I1 Q1 ... I(B-1) Q(B-1)}
+\end{center}
+
+Additional reference fields are appended for module-specific tests. For example, an \ac{SBPS} stage vector also contains the expected sine and cosine values of the selected phase, while a phase-unwrapper vector contains the expected Q4.28 unwrapped phase. Including these additional reference field allow for simple output analysis without leaving the VHDL testbench environment.
+
+\subsection{System-level cases}
+
+For full-chain verification, complete impaired \ac{16QAM} cases are generated by the input-generation script. This script first generates a random Gray-coded bit sequence, maps the bits to scaled \ac{16QAM} symbols, applies channel impairments and writes the resulting vectors to a case directory. The general lay-out can be seen in Figure~\ref{fig:case-lay-out}.
+
+Each case directory contains:
+\begin{itemize}
+    \item \texttt{impaired\_16qam\_q15.txt}, the Q1.15 input stream for RTL simulation,
+    \item \texttt{golden\_symbols\_q15.txt}, the clean transmitted reference symbols,
+    \item \texttt{golden\_bits\_gray.txt}, the transmitted Gray-coded bit sequence,
+    \item and \texttt{metadata.json}, which records the generation parameters.
+\end{itemize}
+
+The metadata file stores the block length, number of symbols, baud rate, \ac{SNR}, residual \ac{CFO}, linewidth-related parameters, random seeds and constellation scaling. This is important because the verification results must be traceable to the exact channel condition and symbol sequence that produced them.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/case_structure.png}
+\caption{Case lay-out}
+\label{fig:case-lay-out}
+\end{figure}
+
+\section{VHDL testbench setup}
+
+The \ac{VHDL} testbenches are split in the same way as the RTL projects. The \ac{SBPS}, \ac{SE}, phase unwrapper, phase correction and top-level wrapper each have dedicated simulation files. Some of these testbenches are self-checking and stop on assertion failures, while others write output vectors that are analysed by Python afterwards.
+
+\subsection{Block-level testbenches}
+
+The block-level testbenches are used during development to verify one module or one small group of modules at a time. Examples include:
+\begin{itemize}
+    \item \texttt{tb\_sbps\_chain\_generic\_vectors}, which applies generated \ac{SBPS} vectors to the serialized search chain,
+    \item \texttt{tb\_spread\_estimation\_backend}, which verifies the absolute spread-estimation backend,
+    \item \texttt{tb\_phase\_unwrapper\_top\_vectors}, which checks the phase unwrapper against Q4.28 reference vectors,
+    \item \texttt{tb\_phase\_compensation\_coeffs}, which verifies the generated section phase words,
+    \item and \texttt{tb\_cordic\_rotate\_bank\_from\_vectors}, which checks the parallel CORDIC rotation output.
+\end{itemize}
+
+These testbenches generally follow the same structure. After reset, they read one vector line, drive the corresponding input signals for one valid cycle, wait for the expected output-valid pulse and then compare the result against the reference. For deterministic arithmetic blocks, exact integer comparison is used. For CORDIC-based rotations, a small integer tolerance is allowed because the Xilinx CORDIC IP introduces its own rounding behaviour.
+
+Valid-signal timing is checked explicitly in several testbenches. This is especially important for the spread-estimation and phase-correction paths, where data and control signals travel through different latency branches before they are merged again. A mismatch in valid alignment can produce numerically plausible but block-shifted results, so the testbenches verify both the output values and the cycle in which they appear.
+
+\subsection{Top-level wrapper testbench}
+
+The system-level simulation uses \texttt{tb\_wrapper\_from\_vectors}. This testbench reads the impaired Q1.15 input stream generated by Python and applies one input block to the complete Vivado block-design wrapper for each \texttt{in\_valid} pulse. The testbench writes the corrected output stream to a text file using the same block format as the input:
+
+\begin{center}
+\texttt{block\_id I0 Q0 ... I(B-1) Q(B-1)}
+\end{center}
+
+The input and output file paths are passed to the testbench through generics. This allows the same compiled testbench to be reused for multiple simulation cases without editing the \ac{VHDL} source. The wrapper currently emits an initial all-zero output block; this first output-valid pulse is ignored by the testbench so that the written output file contains only the meaningful corrected blocks.
+
+Simulation batches are automated by the wrapper-run script. It scans the case directory for inputs, compiles the Vivado simulation sources when required, elaborates a separate snapshot for each case with the correct generic file paths and runs the simulation in batch mode. Each run receives its own output directory under the phase-results folder, containing the RTL output vector and associated logs.
+
+\section{Error analysis}
+
+After simulation, Python analysis scripts are used to compare the RTL output against the expected behaviour. The exact error metric depends on the verification level.
+
+\subsection{Block-level analysis}
+
+For individual arithmetic blocks, the analysis is mostly based on fixed-point error. The Python reference produces the expected integer output in the same Q-format as the RTL. The output error can then be expressed either directly in integer LSBs or converted back to radians for phase-related blocks.
+
+For \ac{SBPS} verification, the relevant checks are the selected branch, the selected effective phase and the decision-directed metric behaviour. The generated vectors make it possible to verify whether a stage selected the same candidate as the golden model. Additional analysis scripts can reconstruct the residual phase error and decision-directed EVM from the vector files.
+
+For spread estimation, the analysis checks the fixed-point fourth-power path, the normalized dot product, the arccosine \ac{LUT} output, the sign decision and the final signed spread estimate. The absolute magnitude and sign are deliberately analysed separately, because an error in the sign path can produce a correct magnitude with the wrong compensation direction.
+
+For the phase unwrapper, the comparison is performed in Q4.28. The reference sequence generated by Python includes the expected quadrant branch, so the output phase and the debug unwrap index can both be inspected. This makes it possible to distinguish between a numerical phase-word error and an incorrect quadrant update.
+
+For the phase compensator, the analysis compares the generated section phases and the rotated \ac{I/Q} samples. When a clean reference block is available, the residual phase per symbol can be estimated from the phase difference between the RTL output and the transmitted symbol.
+
+\subsection{System-level analysis}
+
+For full-wrapper runs, the first analysis step is to compare the corrected RTL output with the impaired input and the clean reference constellation. This is used to produce constellation overlays and heatmaps, which are useful for detecting phase-tracking failures, persistent quadrant slips or residual intra-block rotation.
+
+The second analysis step computes residual phase metrics. The corrected RTL samples are compared with the clean reference symbols block by block. For each block, the residual phase trajectory is estimated and fitted with a centre residual phase and a residual phase spread. This separates a remaining common phase offset from a remaining intra-block slope.
+
+These metrics form the basis for the system-level results in Chapter~\ref{Results}. The overall lay-out of the result analysis structure is given in Figure~\ref{fig:result-lay-out}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/result_structure.png}
+\caption{Result lay-out}
+\label{fig:result-lay-out}
+\end{figure}
+
+This analysis structure keeps the verification and the final result interpretation separate. Chapter~\ref{Results} uses the generated reports and plots to discuss phase error, EVM, latency and resource usage, while the present chapter defines how those reports are produced.
 
 
 

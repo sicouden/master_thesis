@@ -1,26 +1,5 @@
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. 
-Nibh sit amet commodo nulla facilisi nullam.
-Amet venenatis urna cursus eget nunc scelerisque. 
-Mauris cursus mattis molestie a iaculis at. 
-Est sit amet facilisis magna etiam tempor orci eu. 
-Malesuada nunc vel risus commodo viverra maecenas accumsan. 
-Volutpat diam ut venenatis tellus in metus vulputate. 
-Adipiscing tristique risus nec feugiat in. 
-Orci sagittis eu volutpat odio facilisis mauris sit. 
-Posuere ac ut consequat semper. 
-Amet commodo nulla facilisi nullam vehicula ipsum a arcu cursus.
-Odio euismod lacinia at quis risus. 
-Natoque penatibus et magnis dis parturient.
-Eleifend donec pretium vulputate sapien nec.
-Odio pellentesque diam volutpat commodo sed.
-Tellus molestie nunc non blandit massa enim nec dui nunc. 
-Turpis egestas integer eget aliquet.
-Consequat id porta nibh venenatis cras sed.
-Purus in mollis nunc sed id semper risus in hendrerit. 
-Pellentesque eu tincidunt tortor aliquam nulla facilisi cras fermentum. 
-Porttitor eget dolor morbi non. 
-Vivamus at augue eget arcu dictum. 
-Eget felis eget nunc lobortis. 
-Urna nunc id cursus metus aliquam eleifend mi.
-Est pellentesque elit ullamcorper dignissim cras. 
-A erat nam at lectus.
+Coherent optical links are increasingly considered for high-capacity intra-datacenter communication, but their receiver \ac{DSP} requires efficient carrier recovery to compensate residual carrier frequency offset and laser phase noise. Conventional blind phase search provides robust phase estimation for square-QAM constellations, but its hardware cost grows with the number of tested phase candidates. This thesis presents a fixed-point \ac{FPGA} implementation of a low-complexity carrier-recovery backend for baudrate-sampled \ac{16QAM} coherent links. The architecture combines serialised binary phase search, which estimates the wrapped centre phase of a processing block, with spread estimation, which estimates the signed intra-block phase evolution. Phase unwrapping and section-based phase compensation then convert these estimates into per-section correction phases for the delayed received symbol block.
+
+The implemented \ac{RTL} uses packed Q1.15 I/Q samples, trigonometric phase coefficients in the \ac{SBPS} path and Q4.28 phase words in the spread-estimation, unwrapping and compensation paths. The spread-estimation branch includes candidate-symbol selection, fourth-power processing, normalized dot-product evaluation, sign estimation, filtering and \ac{LUT}-based angle recovery. A top-level wrapper aligns the \ac{SBPS} centre-phase estimate, the signed spread estimate and the delayed raw I/Q block before final compensation.
+
+The design is verified using Python reference models, generated fixed-point vectors, \ac{VHDL} testbenches and post-processing scripts. Top-level simulations show no persistent phase drift between the Python model and the \ac{RTL}; the largest measured mean model difference over the evaluated cases is 2.251 mrad. For the default residual-\ac{CFO} test case, the impaired signal has an \ac{EVM} of 142\%. Blockwise \ac{SBPS} correction reduces this to 12.69\%, while combined \ac{SBPS} and spread-estimation compensation reduces it further to 7.41\%. Implementation on an XCU200 target shows that the evaluated \(B=32\), six-stage, eight-section configuration uses about \(33.3\mathrm{k}\) LUTs, \(36.0\mathrm{k}\) flip-flops, 229 DSP blocks and four BRAM tiles, and closes timing at an \(8~\mathrm{ns}\) clock period after a local pipeline register is added in the spread-estimation path.

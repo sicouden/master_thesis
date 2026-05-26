@@ -398,7 +398,6 @@ In conventional feed-forward carrier recovery systems, a single carrier phase es
 \includegraphics[width=1    \linewidth]{figures/top_architecture.png}
 \caption{Top architecture}
 \end{figure}
-\todo{make figure more clear, seems to minimalistic?}
 
 In the presence of residual \ac{CFO}, the phase evolves approximately linearly with symbol index, while laser phase noise introduces additional random deviations. As a result, a single phase estimate can become insufficient for accurately compensating all symbols inside the block. Symbols located further away from the phase estimation point accumulate additional residual phase error.
 
@@ -453,7 +452,7 @@ For square \ac{QAM} constellations, the search interval may be limited to:
 \left[-\frac{\pi}{4},\frac{\pi}{4}\right)
 \]
 
-because the \ac{BPS} metric is inherently $\pi/2$-periodic due to the rotational symmetry of square constellations \todo{is source already cited?}.
+because the \ac{BPS} metric is inherently $\pi/2$-periodic due to the rotational symmetry of square constellations.
 
 The key idea of \ac{SBPS} is that the optimal phase estimate is approximated through successive refinement stages. Instead of evaluating many test phases simultaneously, only two candidate rotations are evaluated at each stage:
 \begin{itemize}
@@ -484,13 +483,10 @@ The proposed implementation adopts a binary refinement structure. The first stag
 
 while stage $m$ refines the estimate through:
 
-\[
-\hat{\phi}_m
-=
-\hat{\phi}_{m-1}
-\pm
-\frac{\pi}{2^{m+2}}
-\]
+\begin{equation}\label{eq:sbps resolution}
+    \hat{\phi}_m = \hat{\phi}_{m-1} \pm \frac{\pi}{2^{m+2}}
+\end{equation}
+
 
 Each stage therefore halves the remaining search uncertainty.
 
@@ -504,7 +500,8 @@ This procedure is mathematically equivalent to a binary search over the phase in
 
 For each candidate phase $\phi$, a decision-directed metric is computed:
 
-\[
+\begin{equation}
+\label{eq:decision metric}
 J(\phi)=
 \sum_{k\in\mathcal{W}}
 \left|
@@ -512,7 +509,8 @@ D\!\left(r_k e^{-j\phi}\right)
 -
 r_k e^{-j\phi}
 \right|^2
-\]
+\end{equation}
+
 
 with:
 \begin{itemize}
@@ -526,9 +524,19 @@ The candidate phase producing the smallest metric is assumed to correspond most 
 
 This estimate is subsequently forwarded to the phase unwrapping and phase compensation stages. Because only one phase estimate is produced per block, and because the \ac{BPS} metric is $\pi/2$-ambiguous for square \ac{QAM} constellations, additional processing is required to track phase continuity between successive blocks. This task is handled by the phase unwrapping stage, while the \ac{SE} block reconstructs the phase evolution inside each block.
 
+\subsection{Pattern effect}\label{subsec:sbps-pattern-effect}
+
+The decision metric of Equation~\ref{eq:decision metric} assumes that, after the correct test rotation, the slicer decision \(D(\cdot)\) gives a useful reference for every symbol in the window. For square 16QAM this is not always true. The constellation contains inner symbols \((\pm s,\pm s)\), outer corner symbols \((\pm 3s,\pm 3s)\), and middle-ring symbols \((\pm s,\pm 3s)\) or \((\pm 3s,\pm s)\). The middle-ring symbols are close to both an inner/outer axis decision boundary and an angular decision boundary. When the test phase is still coarse, a middle-ring symbol can therefore be sliced to a neighbouring point in a way that produces a small Euclidean error for an incorrect candidate phase.
+
+This behaviour is referred to as the pattern effect in the \ac{BPS} literature. Li et al. explicitly identify it as a design constraint for reduced-complexity two-stage \ac{BPS} estimators and propose parameter choices that reduce complexity while mitigating the pattern effect \cite{Li2011JLT}. The problem is not that a single middle-ring symbol is always wrong. Rather, the accumulated metric can be biased when the block contains an unfavourable pattern of such symbols. In that case the metric curve can contain a false local minimum, so the binary stage may choose the wrong branch even though the correct phase is still inside the search interval.
+
+The proposed \ac{SBPS} implementation therefore uses radius-directed decisions in the first refinement stages. The purpose is to make the early metric less sensitive to ambiguous middle-ring decisions. Instead of allowing all 16QAM decision regions to contribute equally, the early stages use a simplified decision rule that keeps the reliable diagonal symbol classes: inner symbols remain mapped to \((\pm s,\pm s)\), while samples outside a central box are treated as corner-like symbols and mapped to \((\pm 3s,\pm 3s)\). This removes the explicit middle-ring decision from the coarse stages and makes the metric behave more like a \ac{QPSK}-partitioned phase metric.
+
+This radius-directed mode is only used for the first \(N_{\mathrm{RD}}\) stages. These are the stages where the candidate phase spacing is largest and where the pattern effect is most likely to affect the branch decision. After the estimate has been refined, the remaining phase uncertainty is smaller, so the later stages return to the normal 16QAM slicer. The final stages can then use the full constellation geometry to reduce quantisation error without reintroducing the same level of coarse-stage false-minimum risk.
+
 \subsection{Block size consideration}
 
-The block size directly influences the effectiveness of the \ac{SBPS} estimate. The coarse frequency recovery stage has a finite \ac{FFT}-bin spacing, which determines the maximum residual \ac{CFO} after frequency recovery. Using the half-bin error bound from Equation~\ref{eq: frequency recovery bin size error}, the residual frequency error satisfies:
+This section will cover how the block size directly influences the effectiveness of the \ac{SBPS} estimate. Coarse frequency recovery stage has a finite \ac{FFT}-bin spacing, which determines the maximum residual \ac{CFO} after frequency recovery. Using the half-bin error bound from Equation~\ref{eq: frequency recovery bin size error}, the residual frequency error satisfies:
 
 \begin{equation}
     \Delta f_e \leq \frac{F_s}{2N_{\mathrm{FFT}}}
@@ -573,6 +581,7 @@ For example, a block size of $B = 64$ requires at least $N_{\mathrm{FFT}} > 256$
 
 The block size also creates a trade-off in estimation quality. A larger metric accumulation window improves robustness against additive noise because random perturbations are averaged over more samples \cite{Mello_2018}. At the same time, a larger block spans a longer time interval, so the carrier phase variation caused by residual \ac{CFO} and laser phase noise becomes larger within the block. This trade-off is one of the main motivations for combining a middle-block \ac{SBPS} estimate with a separate \ac{SE} block.
 
+
 %----------------------------------------------------------
 % SPREAD ESTIMATION
 %----------------------------------------------------------
@@ -594,21 +603,45 @@ This effect becomes increasingly important when the residual \ac{CFO} after freq
 
 The \ac{SE} block is introduced to estimate this residual phase evolution across the block. Rather than estimating a separate carrier phase for every symbol, which would significantly increase computational complexity, the proposed method estimates the total phase spread over the block and reconstructs the intermediate phase trajectory from this information.
 
-The proposed spread estimation algorithm operates on symbols that are raised to the fourth power. For square \ac{QAM} constellations, the fourth-power operation suppresses the modulation-dependent phase terms while preserving the carrier-related phase rotation.
-
-For a received symbol:
+The working principle is easiest to see for a \ac{QPSK}-like constellation. A received symbol can be written as the product of a transmitted constellation point and the unknown carrier phase rotation:
 
 \begin{equation}
-r_k = a_k e^{j\phi_k}
+    r_k
+    =
+    s_k e^{j\phi_k}.
+    \label{eq:se-received-symbol}
 \end{equation}
 
-the fourth-power operation gives:
+For \ac{QPSK}, the transmitted symbol has a constant magnitude and one of four phases separated by \(\pi/2\):
 
 \begin{equation}
-r_k^4 = a_k^4 e^{j4\phi_k}
+    s_k
+    =
+    A e^{j(\alpha+n_k\pi/2)},
+    \qquad
+    n_k \in \{0,1,2,3\},
+    \label{eq:qpsk-symbol-phase}
 \end{equation}
 
-The modulation phase ambiguity is removed because square \ac{QAM} constellations exhibit rotational symmetry over multiples of $\pi/2$. After fourth-power transformation, the dominant remaining phase term therefore corresponds to four times the underlying carrier phase evolution.
+where \(\alpha\) is a fixed constellation rotation. Raising the received symbol to the fourth power gives:
+
+\begin{equation}
+    r_k^4
+    =
+    A^4
+    e^{j4\alpha}
+    e^{j2\pi n_k}
+    e^{j4\phi_k}
+    =
+    A^4
+    e^{j4\alpha}
+    e^{j4\phi_k}.
+    \label{eq:qpsk-fourth-power}
+\end{equation}
+
+The symbol-dependent phase term has disappeared because \(e^{j2\pi n_k}=1\). The fourth-power signal still contains a constant constellation factor \(A^4e^{j4\alpha}\), but this factor is the same for all \ac{QPSK} symbols and therefore cancels in the normalized comparisons used below. The phase that remains between two transformed samples is four times the difference in carrier phase. In this ideal case, the fourth-power operation has removed the modulation phase ambiguity while preserving the carrier-related phase evolution.
+
+The spread estimator uses this principle on selected \ac{16QAM} symbols. This requires an additional selection step because square 16QAM is not a constant-modulus constellation. The inner- and outer-ring symbols lie on the same diagonal phase set as \ac{QPSK}; after the fourth-power operation they therefore share the same phase reference, apart from their amplitude. The middle-ring symbols do not satisfy this property: their phases are not separated only by multiples of \(\pi/2\), so raising them to the fourth power leaves a symbol-dependent phase term. If such symbols were used directly, the estimator could confuse this residual modulation term with an actual carrier-phase spread.
 
 Under the locally linear phase assumption introduced in Equation~\ref{eq:SE-linear-assumption}, the total phase spread across the block may be estimated from representative symbols located near:
 \begin{itemize}
@@ -675,13 +708,7 @@ Combining both estimates yields the final spread estimate:
 
 The estimated spread is subsequently used to extrapolate leading and lagging phase estimates for the phase unwrapper and to reconstruct multiple phase corrections inside the block during phase compensation.
 
-The method nevertheless introduces several limitations specific to square 16QAM constellations. Unlike \ac{QPSK}, where the fourth-power operation maps all transformed symbols onto a single radius, the fourth-power transformation of 16QAM results in multiple amplitude rings. Some transformed constellation points therefore become unsuitable for accurate spread estimation because their relative phase relationships introduce ambiguities.
-
-As a consequence, not every received symbol may be used directly for spread estimation. The architecture therefore includes an input-selection stage that identifies suitable candidate symbols before the actual spread calculation is performed.
-
-\subsection{Input symbol consideration}\label{input selector}
-
-For \ac{QPSK}, the fourth-power operation maps all constellation symbols onto a single circle. For square 16QAM, however, the transformed symbols occupy multiple radii after the fourth-power operation. This behaviour is illustrated in Figure~\ref{fig:fourth-power-constellation}.
+The fourth-power transformation of the \ac{16QAM} constellation is illustrated in Figure~\ref{fig:fourth-power-constellation}. Unlike \ac{QPSK}, where all transformed symbols share one phase reference and one radius, transformed 16QAM symbols occupy multiple radii and, for the middle-ring points, multiple residual phase classes. The amplitude differences themselves are not a problem because the spread magnitude is extracted through a normalized dot product. The residual phase classes are the problem: they add a data-dependent phase offset that is unrelated to the carrier phase evolution.
 
 \begin{figure}[H]
 \centering
@@ -689,10 +716,12 @@ For \ac{QPSK}, the fourth-power operation maps all constellation symbols onto a 
 \caption{16QAM symbols after fourth-power transformation}
 \label{fig:fourth-power-constellation}
 \end{figure}
-\todo{find more representative mapping}
 
+As a consequence, not every received symbol may be used directly for spread estimation. The architecture therefore includes an input-selection stage that identifies suitable inner- or outer-ring candidate symbols before the actual spread calculation is performed.
 
-Symbols originating from the middle ring of the 16QAM constellation can introduce large phase ambiguities after fourth-power transformation. Using these symbols directly in the normalized dot-product calculation of Equation~\ref{eq:spread-cos} can therefore lead to incorrect spread estimates. To mitigate this problem, the spread estimator only considers symbols originating from the inner and outer constellation rings. These symbols retain an unambiguous phase transformation after the fourth-power calculation and therefore yield more reliable spread estimates.
+\subsection{Input symbol consideration}\label{input selector}
+
+Symbols originating from the middle ring of the 16QAM constellation can introduce large phase ambiguities after fourth-power transformation. Using these symbols directly in the normalized dot-product calculation of Equation~\ref{eq:spread-cos} can therefore lead to incorrect spread estimates. To mitigate this problem, the spread estimator only considers symbols originating from the inner and outer constellation rings. These symbols retain the \ac{QPSK}-like fourth-power phase relation and therefore yield more reliable spread estimates.
 
 Rather than searching the complete processing block for suitable symbols, only a limited subset of symbols near the beginning, middle and end of the block is evaluated. This reduces hardware complexity while maintaining a sufficiently high probability of finding valid candidate symbols.
 
@@ -718,14 +747,178 @@ P(\mathrm{hit})
 \label{eq:selection-prob}
 \end{equation}
 
-A moderate value of $N$ therefore already yields a high probability of obtaining usable symbols while avoiding the hardware cost associated with a full-block search. For example, $N=3$ gives $P(\mathrm{hit}) = 49/64 \approx 76.6\%$ under the uniform-symbol assumption. If no suitable candidate combination is found, the previously estimated spread value is retained. This behaviour is justified by the relatively slow variation of practical laser frequency offsets compared to the short duration of a processing block in baudrate-sampled coherent systems.
+A moderate value of $N$ therefore already yields a high probability of obtaining usable symbols while avoiding the hardware cost associated with a full-block search. For example, $N=3$ gives $P(\mathrm{hit}) = 49/64 \approx 76.6\%$ under the uniform-symbol assumption, as illustrated in Figure~\ref{fig:prob-hit}. If no suitable candidate combination is found, the previously estimated spread value is retained. This behaviour is justified by the relatively slow variation of practical laser frequency offsets compared to the short duration of a processing block in baudrate-sampled coherent systems.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/hit_probability.png}
+\caption{Hit probability versus \#candidate symbols}
+\label{fig:prob-hit}
+\end{figure}
+
 
 The selected candidate symbols are subsequently forwarded to the hardware blocks responsible for fourth-power calculation, spread estimation and sign estimation.
 
 \section{Phase unwrapping}
+
+The \ac{SBPS} stage produces one carrier phase estimate per block, but this estimate is still ambiguous by multiples of $\pi/2$ because the decision-directed metric is invariant under quadrant rotations for square \ac{QAM} constellations. Therefore, the estimated centre phase $\hat{\phi}_{e,b}$ of block $b$ must be unwrapped before it can be used as a continuous phase trajectory.
+
+If only the centre phases of consecutive blocks were compared, a large intra-block phase spread could be interpreted incorrectly as a discontinuity between blocks. The proposed architecture therefore unwraps the phase by comparing the extrapolated edge phases of neighbouring blocks. The signed spread estimate $\hat{\theta}_b$ is used to estimate the phase at the left and right edge of block $b$:
+
+\begin{align}
+\hat{\phi}_{L,b}
+&=
+\hat{\phi}_{e,b}
+-
+\frac{\hat{\theta}_b}{2},
+\\
+\hat{\phi}_{R,b}
+&=
+\hat{\phi}_{e,b}
++
+\frac{\hat{\theta}_b}{2}.
+\end{align}
+
+Here, $\hat{\phi}_{L,b}$ represents the estimated carrier phase at the beginning of the block, while $\hat{\phi}_{R,b}$ represents the estimated carrier phase at the end of the block. This is also visualised in Figure~\ref{fig:phase-unwrapping}. For a positive spread estimate, the phase therefore increases from the left edge to the right edge.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{figures/phase_unwrap_example.png}
+\caption{Example of a phase unwrapping}
+\label{fig:phase-unwrapping}
+\end{figure}
+
+The edge discontinuity between two consecutive blocks is defined as:
+
+\begin{equation}
+d_b =
+\hat{\phi}_{L,b}
+-
+\hat{\phi}_{R,b-1}.
+\label{eq:unwrap-edge-diff}
+\end{equation}
+
+As long as the correct $\pi/2$ branch is maintained, this difference should remain small because the right edge of the previous block and the left edge of the current block describe adjacent points in the same phase trajectory. A discontinuity larger than the quadrant-decision threshold indicates that the wrapped \ac{SBPS} estimate has crossed to a neighbouring $\pi/2$ branch.
+
+The phase-unwrapping state is stored as an integer quadrant index $q_b$. This index determines which multiple of $\pi/2$ must be added to the wrapped \ac{SBPS} phase estimate:
+
+\begin{equation}
+\tilde{\phi}_{e,b}
+=
+\hat{\phi}_{e,b}
++
+q_b\frac{\pi}{2},
+\label{eq:unwrapped-centre-phase}
+\end{equation}
+
+where $\tilde{\phi}_{e,b}$ denotes the unwrapped centre phase. The quadrant index is updated from the edge discontinuity as:
+
+\begin{equation}
+q_b =
+\begin{cases}
+q_{b-1}-1, & d_b \geq \frac{\pi}{4},\\
+q_{b-1}+1, & d_b < -\frac{\pi}{4},\\
+q_{b-1}, & \text{otherwise}.
+\end{cases}
+\label{eq:unwrap-index-update}
+\end{equation}
+
+The first block establishes the initial branch and is therefore passed through without a correction. For all subsequent blocks, the update in Equation~\ref{eq:unwrap-index-update} tracks quadrant crossings caused by the wrapped \ac{SBPS} estimate. In the hardware implementation this index may be stored modulo four, since adding $2\pi$ does not change the final compensated constellation.
+
+The threshold of $\pi/4$ follows directly from the $\pi/2$ ambiguity of square \ac{QAM}. If the edge-to-edge phase difference remains within $[-\pi/4,\pi/4)$, the current block is assumed to belong to the same quadrant branch. If this interval is exceeded, the estimate is corrected by one quadrant. This also defines the practical tracking condition of the unwrapper: the true phase change between the compared block edges, including residual \ac{CFO}, phase noise and estimation error, should remain smaller than the threshold. Otherwise, a wrong quadrant update can occur and a cycle slip is introduced.
+
+By using the spread estimate during unwrapping, the decision is made at the physical boundary between two blocks rather than at their centres. This improves robustness when a residual \ac{CFO} creates a significant phase ramp inside each block. The phase unwrapper therefore links the blockwise \ac{SBPS} estimates into a continuous phase trajectory that can be used by the final compensation stage.
+
 \section{Phase compensation}
 
-\section{Expected performance}
+After phase unwrapping, the receiver has two phase-related quantities for each block:
+\begin{itemize}
+    \item the unwrapped centre phase $\tilde{\phi}_{e,b}$,
+    \item and the signed spread estimate $\hat{\theta}_b$.
+\end{itemize}
+
+Together, these quantities describe a locally linear approximation of the carrier phase across the block. The most direct compensation method would be to calculate an individual phase correction for every symbol. However, this would require a separate phase value and rotator input for each symbol, increasing routing and arithmetic complexity in the hardware implementation.
+
+To reduce this complexity, the block is divided into $N_{\mathrm{sec}}$ compensation sections. Each section is compensated using one representative phase value located at the centre of that section. Let $n$ denote the section index, with:
+
+\begin{equation}
+n = 0,1,\dots,N_{\mathrm{sec}}-1.
+\end{equation}
+
+The normalized position of the centre of section $n$, relative to the block centre, is:
+
+\begin{equation}
+c_n =
+\frac{2n+1-N_{\mathrm{sec}}}{2N_{\mathrm{sec}}}.
+\label{eq:section-position}
+\end{equation}
+
+The phase correction applied to section $n$ is then given by:
+
+\begin{equation}
+\hat{\phi}_{b,n}
+=
+\tilde{\phi}_{e,b}
++
+c_n\hat{\theta}_b.
+\label{eq:section-phase}
+\end{equation}
+
+This expression reconstructs a piecewise-constant approximation of the linear phase trajectory, which is illustrated in Figure~\ref{fig:phase-compensation}. The first section receives a correction close to the left-edge phase, the last section receives a correction close to the right-edge phase, and the middle sections are distributed symmetrically around the unwrapped \ac{SBPS} centre phase.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/phase_compensation_example.png}
+\caption{Section-based phase compensation}
+\label{fig:phase-compensation}
+\end{figure}
+
+The set of symbol indices belonging to section $n$ is defined as:
+
+\begin{equation}
+\mathcal{S}_n
+=
+\left\{
+k
+\;\middle|\;
+\left\lfloor
+\frac{nB}{N_{\mathrm{sec}}}
+\right\rfloor
+\leq k <
+\left\lfloor
+\frac{(n+1)B}{N_{\mathrm{sec}}}
+\right\rfloor
+\right\}.
+\label{eq:section-index-set}
+\end{equation}
+
+All symbols belonging to section $n$ are then rotated by the negative of the corresponding phase estimate:
+
+\begin{equation}
+\tilde{r}_{b,k}
+=
+r_{b,k}e^{-j\hat{\phi}_{b,n}},
+\qquad
+k \in \mathcal{S}_n.
+\label{eq:phase-compensation}
+\end{equation}
+
+This rotation removes both the common centre phase and the estimated intra-block phase ramp.
+
+For $N_{\mathrm{sec}}=1$, the method reduces to conventional blockwise phase compensation using only the unwrapped \ac{SBPS} estimate. Increasing $N_{\mathrm{sec}}$ improves the approximation of the phase ramp, but also increases the number of phase values that must be generated and routed to the rotators. For an ideal linear phase evolution, the maximum residual phase error inside one section is approximately:
+
+\begin{equation}
+|\epsilon_{\phi,\mathrm{max}}|
+\approx
+\frac{|\hat{\theta}_b|}{2N_{\mathrm{sec}}}.
+\label{eq:section-residual-error}
+\end{equation}
+
+This relation illustrates the main design trade-off. A larger number of compensation sections reduces the residual phase error after correction, while a smaller number of sections reduces hardware complexity. The implemented architecture therefore uses section-based compensation as a compromise between per-symbol phase correction and a single blockwise phase correction.
+
+The hardware-oriented datapath, uses the piecewise-constant section model described above because the section coefficients of Equation~\ref{eq:section-position} can be precomputed and each section phase can be generated with one multiplication and one addition. This makes the phase compensation stage well suited for a parallel block-based FPGA implementation.
+
+% \section{Expected performance}
 
 
 
