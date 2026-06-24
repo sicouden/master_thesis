@@ -13,9 +13,9 @@
 \chapter{Introduction}
 \section{Context and motivation}
 The rapid growth of cloud computing, large-scale streaming platforms and AI services has sharply increased the amount of data exchanged inside modern datacenters. In particular, AI training and inference workloads rely on dense east-west traffic between accelerators, servers and switching equipment, which places stringent demands on the internal interconnect fabric \cite{Blumenthal2020JLT,Zhang2025OJSSCS}. As a result, the optical links between servers, racks and switches are becoming a critical bottleneck for both throughput and energy efficiency.
-
+\\\\
 To support this growth, datacenter optical interconnects are evolving toward 800~Gbit/s and 1.6~Tbit/s transceivers \cite{Zhou2023OFC,Zhou2020JLT}. The challenge is not only to increase the raw data rate, but to do so while keeping power consumption, latency and implementation cost within practical limits.
-
+\\\\
 Today, most short-reach intra-datacenter optical links rely on \ac{IMDD}, often using \ac{PAM4} signalling, because these links offer relatively low implementation complexity and good power efficiency over short reaches \cite{Zhou2020JLT,Zhang2025OJSSCS}. However, as symbol rates and transmission distances continue to increase, \ac{IMDD} systems approach their limits in terms of chromatic-dispersion tolerance, achievable spectral efficiency and receiver sensitivity. Figure~\ref{fig:IMDD_versus_Coherent_Use} qualitatively illustrates how the transition from direct-detection to coherent techniques moves toward shorter reaches as the target data rate increases \cite{Zhou2020JLT,Seiler2021FOE}.
 
 \begin{figure}[H]
@@ -31,18 +31,7 @@ Coherent optical communication offers an attractive alternative because it modul
 Although coherent optical communication provides important advantages in terms of spectral efficiency and receiver sensitivity, these benefits come at the cost of increased receiver complexity. In particular, the \ac{DSP} chain of a coherent receiver contains computationally expensive blocks for frequency recovery and carrier phase recovery.
 \\\\
 Carrier recovery compensates the residual frequency offset and phase noise caused by the finite linewidth of the transmitter and local-oscillator lasers. In conventional coherent receivers, this is often split into a coarse frequency-estimation stage, for example using fourth-power spectral estimation, followed by a carrier-phase estimator such as \ac{BPS} \cite{Leven2007LPT,IpKahn2007JLT,Pfau2009JLT}. The fourth-power stage exposes a carrier-related spectral tone that enables a coarse estimate of the residual frequency offset, after which the phase-recovery stage compensates the remaining constellation rotation and phase noise.
-
-% Figure~\ref{fig:intro-fourth-power-spectrum} shows a placeholder for a figure that would make this coarse frequency-recovery principle explicit in the introduction.
-
-% \begin{figure}[H]
-% \centering
-% \fbox{\parbox{0.9\linewidth}{\centering
-% \textbf{Missing figure placeholder}\\[0.5em]
-% Spectrum of the fourth-power signal used for coarse frequency recovery. The final figure should show the dominant spectral tone at $4\Delta f$, the FFT-bin spacing, and the residual frequency-estimation error that remains when the nearest FFT bin is selected.}}
-% \caption{Placeholder for a fourth-power spectrum illustrating coarse frequency-offset estimation.}
-% \label{fig:intro-fourth-power-spectrum}
-% \end{figure}
-
+\\\\
 At first sight, a higher baud rate could appear to simplify phase recovery, since the symbol period becomes shorter and the laser-induced phase-noise increment between adjacent symbols decreases for a fixed linewidth. In practice, however, the implementation challenge remains severe. High-baudrate coherent receivers must process more symbols per second and typically rely on strong parallelism, while coarse frequency recovery still requires sufficient FFT resolution and \ac{BPS} still requires multiple candidate rotations and metric evaluations per block. Consequently, carrier recovery remains a significant contributor to coherent \ac{DSP} complexity and power consumption in feed-forward hardware implementations \cite{Kuschnerov2009JLT,Pfau2009JLT}.
 \\
 \\
@@ -73,9 +62,9 @@ The objective of this evaluation is therefore not only to determine the absolute
 
 \section{Contributions}
 This thesis contributes a complete fixed-point \ac{RTL} implementation of the proposed \ac{SBPS}+\ac{SE} carrier-recovery backend for baudrate-sampled \ac{16QAM} coherent links. The work goes beyond modelling the algorithm by translating the centre-phase estimator, spread estimator, phase unwrapper and phase compensator into a hardware-oriented processing chain with explicit numerical formats, pipeline stages and valid-signal alignment.
-
+\\\\
 A central contribution is the hardware realization of the spread-estimation path. This includes candidate-symbol selection, fourth-power processing, normalized dot-product evaluation, sign estimation, filtering and \ac{LUT}-based angle recovery. The thesis also contributes the top-level integration of this spread estimate with the \ac{SBPS} centre-phase estimate and the delayed raw I/Q block, so that the final phase-compensation stage operates on mutually aligned phase and sample data.
-
+\\\\
 Finally, the work contributes a reproducible verification and evaluation flow. Python reference models, generated fixed-point vectors, \ac{VHDL} testbenches and post-processing scripts are used to validate the fixed-point implementation and to compare it with the intended algorithmic behaviour. The resulting performance and implementation analysis identifies useful operating regions for the \ac{SBPS} stage count and compensation-section count, and relates these choices to latency, timing closure and hardware-resource usage.
 
 \section{Thesis outline}
@@ -84,13 +73,13 @@ The remainder of this thesis is structured as follows:
 Chapter \ref{Background} introduces the theoretical background required for this work. First, coherent optical communication systems are discussed, with a focus on how phase noise and residual frequency offset arise in these systems, how they distort the received signal, and how they translate into carrier-recovery requirements. Next, existing carrier-recovery techniques are reviewed together with their limitations and with the motivation for the proposed approach. The emphasis is placed on blind, feed-forward methods, since these are the most relevant candidates for the targeted hardware implementation. The digital representation of \ac{16QAM} signals is then discussed, because the proposed architecture strongly depends on fixed-point symbol scaling, numerical precision and \ac{SNR}-related considerations. Finally, a section is dedicated to the \ac{CORDIC} algorithm and the existing \ac{IP} core used in this work \cite{AMD2021PG105}.
 \\\\
 Chapter \ref{Proposed phase recovery architecture} presents the proposed phase-recovery algorithm from a theoretical perspective. Building on the concepts introduced in the previous chapter, the complete architecture is divided into its main functional blocks, including the \ac{SBPS}, \ac{SE}, \ac{PU} and \ac{PC} modules. For each subblock, the operating principle, mathematical model and expected contribution to the overall system are discussed. The theoretical performance of the proposed method is also analysed based on the work of ir. J. De Busscher and co-authors \cite{Jonas}.
-
+\\\\
 Chapter \ref{Hardware Implementation} describes how the theoretical carrier-recovery system is translated into an \ac{FPGA} implementation. This chapter discusses the practical challenges associated with such an implementation, including fixed-point numerical representations, timing closure and hierarchical design. In addition, it explains how the individual subblocks are combined into a complete processing chain and how dataflow, valid signals and latency alignment are handled throughout the design.
 \\\\
 Chapter \ref{Verification and simulation} explains the simulation and verification framework used for the implemented design. The testbenches of the different subblocks are discussed together with their corresponding results. The purpose of this chapter is to show that the hardware implementation behaves in accordance with the theoretical model and to explain any deviations between both. The focus is therefore on functional correctness rather than on overall system performance under different operating conditions. Comparisons between the \ac{FPGA} implementation and the Python or Simulink reference models are also included to demonstrate that the implemented fixed-point design accurately reproduces the expected behaviour.
 \\\\
 Chapter \ref{Results} evaluates the overall performance of the implemented carrier-recovery system. Separate sections discuss the performance of the \ac{SBPS} and \ac{SE} blocks and identify the conditions under which their performance begins to degrade. The influence of different system parameters, such as block size, number of search stages and datapath bit lengths, is also investigated. In addition, this chapter discusses the hardware resource usage and latency of the final design. The relation between implementation complexity and system performance is analysed in order to determine which parameters offer the most favourable trade-off.
-
+\\\\
 Chapter \ref{Discussion} discusses the limitations of the current implementation and identifies possible improvements for future work. This includes both algorithmic improvements and hardware-related optimizations. Potential extensions such as more advanced \ac{LUT} implementations, adaptive parameter selection, improved symbol-selection strategies and support for higher-order modulation formats are considered. In addition, the discussion reflects on the assumptions made throughout the work, such as the assumption that the residual frequency offset changes only slowly between neighbouring blocks. The chapter also provides a broader overview of the main design trade-offs and explains how these trade-offs influenced the final architecture.
 \\\\
 Finally, Chapter \ref{Conclusion} summarizes the most important aspects of the work. It revisits the original objectives of the thesis, discusses the extent to which these objectives were achieved and reflects on the main findings of the implementation and evaluation. The final chapter also outlines possible directions for future work, including integration into a complete coherent receiver chain and further optimization of the architecture for practical deployment.

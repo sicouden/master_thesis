@@ -14,6 +14,7 @@
 \def\academicyear#1{\gdef\@academicyear{#1}}
 
 \def\acknowledgements#1{\gdef\@acknowledgements{#1}}
+\def\aiacknowledgement#1{\gdef\@aiacknowledgement{#1}}
 \def\abstract#1{\gdef\@abstract{#1}}
 \def\extendedabstract#1{\gdef\@extendedabstract{#1}}
 \def\keywords#1{\gdef\@keywords{#1}}
@@ -321,10 +322,7 @@
 }
 \newcommand{\makecoverpage}{%
   \pagestyle{empty}%
-  \newgeometry{margin=2.5cm}%
-  \maketitle%
-  \clearpage%
-  \restoregeometry%
+  \includepdf[pages=1,pagecommand={},fitpaper=true]{coverpage.pdf}%
   \iftwoside%
     \null%
     \clearpage%
@@ -333,7 +331,7 @@
 }
 \newcommand{\maketitlepage}{%
   \pagestyle{empty}%
-  \maketitle%
+  \includepdf[pages=1,pagecommand={},fitpaper=true]{coverpage.pdf}%
   \iftwoside%
     \cleardoublepage%
   \else%
@@ -346,6 +344,19 @@
   \addcontentsline{toc}{chapter}{\isdutch{Dankwoord}{Acknowledgements}}%
   \chapter*{\isdutch{Dankwoord}{Acknowledgements}}%
   \input{\@acknowledgements}%
+  \iftwoside%
+    \cleardoublepage%
+  \else%
+    \clearpage%
+  \fi%
+}
+\newcommand{\makeaiacknowledgement}{%
+  \phantomsection%
+  \addcontentsline{toc}{chapter}{%
+    \isdutch{Gebruik van AI}{Use of AI acknowledgement}%
+  }%
+  \chapter*{\isdutch{Gebruik van AI}{Use of AI acknowledgement}}%
+  \input{\@aiacknowledgement}%
   \iftwoside%
     \cleardoublepage%
   \else%
@@ -544,6 +555,9 @@
   \maketitlepage%
   \ifdefined\@acknowledgements%
     \makeacknowledgements%
+  \fi%
+  \ifdefined\@aiacknowledgement%
+    \makeaiacknowledgement%
   \fi%
   \makeadmissiontoloan%
   \makepartofexam%

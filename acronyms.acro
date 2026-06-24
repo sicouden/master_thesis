@@ -4,7 +4,7 @@
 \acro{QAM}{quadrature amplitude modulation}
 \acro{16QAM}{16-state quadrature amplitude modulation}
 \acro{ASIC}{application specific integrated circuit}
-\acro{DSP}{digital dignal processing}
+\acro{DSP}{digital signal processing}
 \acro{BPS}{blind phase search}
 \acro{SBPS}{serialised binary phase search}
 \acro{SE}{spread estimation}
@@ -13,7 +13,7 @@
 \acro{FPGA}{field programmable gate array}
 \acro{CORDIC}{coordinate rotation digital computer}
 \acro{IP}{intellectual property}
-\acro{VHDL}{VHSIC Hardware Description Language}
+\acro{VHDL}{VHSIC hardware description language}
 \acro{RTL}{register-transfer level}
 \acro{SNR}{signal-to-noise ratio}
 \acro{BER}{bit error rate}
